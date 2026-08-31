@@ -17,12 +17,33 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         anyhow::bail!("empty package name");
     }
 
+    // Sanitize package name — prevent path-traversal (../, /, \) per aur-package-guidelines
+    let path_binding = PathBuf::from(name);
+    let safe_name = path_binding
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if safe_name.is_empty()
+        || safe_name != name.as_str()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+    {
+        anyhow::bail!("invalid package name: {:?}", name);
+    }
+
     // Determine cache dir: $XDG_CACHE_HOME/pacseek or ~/.cache/pacseek or /tmp/pacseek
+    // Use 0o700 to avoid world-writable race in /tmp fallback (aur-makepkg)
     let cache_base = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("pacseek");
     std::fs::create_dir_all(&cache_base).context("create cache dir")?;
-    let clone_dir = cache_base.join(name);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&cache_base, std::fs::Permissions::from_mode(0o700));
+    }
+    let clone_dir = cache_base.join(safe_name);
 
     // Clone or pull
     if clone_dir.exists() {
@@ -77,7 +98,7 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         let _ = cmd.status();
         eprintln!("--- end PKGBUILD ---\n");
 
-        // Optional namcap audit if installed
+        // Optional namcap audit if installed (aur-audit)
         let has_namcap = Command::new("which")
             .arg("namcap")
             .output()
@@ -92,6 +113,26 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
                 .stderr(std::process::Stdio::inherit())
                 .status();
         }
+
+        // Optional shellcheck for PKGBUILD (aur-audit, aur-package-guidelines)
+        let has_shellcheck = Command::new("which")
+            .arg("shellcheck")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if has_shellcheck {
+            eprintln!("Running shellcheck...");
+            let _ = Command::new("shellcheck")
+                .args([
+                    "--shell=bash",
+                    "--exclude=SC2034,SC2154,SC2164",
+                    &pkgbuild.to_string_lossy(),
+                ])
+                .stdin(std::process::Stdio::inherit())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status();
+        }
     } else {
         eprintln!("Warning: PKGBUILD not found in {}", clone_dir.display());
     }
@@ -99,12 +140,22 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
     // Confirm already done in TUI, but double-check if run from CLI
     // Ask once more if not in TUI? We assume TUI already confirmed, so proceed.
 
-    // Build & install via makepkg -si --needed (aur-makepkg)
-    // Use --syncdeps to install missing deps via sudo pacman
-    eprintln!("\nBuilding and installing {} with makepkg -si ...", name);
+    // Build & install via makepkg -si (aur-makepkg) — default asks, --noconfirm only if explicit
+    // Consistency with repo.rs: repo uses `pacman -S --needed` without --noconfirm; AUR should also ask by default
+    // Enable non-interactive with PACSEEK_NOCONFIRM=1 or --noconfirm flag (future CLI)
+    let noconfirm = std::env::var("PACSEEK_NOCONFIRM").is_ok();
+    eprintln!(
+        "\nBuilding and installing {} with makepkg -si{} ...",
+        name,
+        if noconfirm { " --noconfirm" } else { "" }
+    );
     let mut cmd = Command::new("makepkg");
-    cmd.args(["-si", "--noconfirm"]) // --noconfirm for non-interactive, pacman will still use sudo
-        .current_dir(&clone_dir)
+    if noconfirm {
+        cmd.args(["-si", "--noconfirm"]);
+    } else {
+        cmd.args(["-si"]);
+    }
+    cmd.current_dir(&clone_dir)
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit());
