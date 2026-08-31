@@ -1,9 +1,23 @@
+use std::sync::OnceLock;
+
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::model::Package;
 
 const AUR_RPC: &str = "https://aur.archlinux.org/rpc/v5";
+
+static AUR_BLOCKING_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+
+fn blocking_client() -> &'static reqwest::blocking::Client {
+    AUR_BLOCKING_CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("failed to build blocking reqwest client")
+    })
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct AurResponse {
@@ -152,10 +166,7 @@ pub fn search_aur_blocking(
     let encoded = encoded.replace('+', "%20");
     let url = format!("{}/search/{}?by={}", AUR_RPC, encoded, by);
     tracing::debug!(url=%url, "aur blocking request");
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
+    let client = blocking_client();
     let resp = client
         .get(&url)
         .header(

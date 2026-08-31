@@ -1,16 +1,30 @@
+use std::sync::OnceLock;
+
 use alpm::{Alpm, SigLevel};
 use pacmanconf::Config;
 
 use crate::model::Package;
 
-pub fn search_repo(
+static CACHED_CONFIG: OnceLock<Config> = OnceLock::new();
+
+/// Get cached pacman config (parses pacman.conf once per process)
+/// Falls back to fresh parse if cache not yet initialized or on error
+pub fn get_cached_config() -> anyhow::Result<Config> {
+    if let Some(cfg) = CACHED_CONFIG.get() {
+        return Ok(cfg.clone());
+    }
+    let cfg = Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}"))?;
+    let _ = CACHED_CONFIG.set(cfg.clone());
+    Ok(cfg)
+}
+
+pub fn search_repo_with_config(
+    config: &Config,
     query: &str,
     limit: usize,
     use_regex: bool,
     installed_only: bool,
 ) -> anyhow::Result<Vec<Package>> {
-    // Load pacman config (uses pacman-conf binary under the hood)
-    let config = Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}"))?;
     let db_path = if config.db_path.is_empty() {
         "/var/lib/pacman".to_string()
     } else {
@@ -22,14 +36,12 @@ pub fn search_repo(
         config.root_dir.clone()
     };
 
-    tracing::debug!(db_path=%db_path, root_dir=%root_dir, repos=?config.repos.iter().map(|r| &r.name).collect::<Vec<_>>(), "init alpm");
+    tracing::debug!(db_path=%db_path, root_dir=%root_dir, repos=?config.repos.iter().map(|r| &r.name).collect::<Vec<_>>(), "init alpm (cached)");
 
     let handle = Alpm::new(root_dir.as_str(), db_path.as_str())
         .map_err(|e| anyhow::anyhow!("alpm init failed: {e:?} (db_path={db_path})"))?;
 
-    // Register sync dbs from pacman.conf
     for repo in &config.repos {
-        // Ignore errors for missing DBs but log
         if let Err(e) = handle.register_syncdb(repo.name.as_str(), SigLevel::USE_DEFAULT) {
             tracing::warn!(repo=%repo.name, err=?e, "failed to register syncdb, skipping");
         }
@@ -40,13 +52,8 @@ pub fn search_repo(
         tracing::warn!("no syncdbs registered — is pacman DB synced? Run `sudo pacman -Sy`");
     }
 
-    // Also get local db for installed check
     let localdb = handle.localdb();
-
     let mut results: Vec<Package> = Vec::new();
-
-    // If regex mode, use alpm's regex search directly
-    // Otherwise use substring case-insensitive filter (manual) for more predictable matching
     let query_lower = query.to_lowercase();
     let re = if use_regex {
         Some(
@@ -60,9 +67,7 @@ pub fn search_repo(
 
     for db in syncdbs.iter() {
         let db_name = db.name().to_string();
-
         if use_regex {
-            // alpm supports regex search per field; we use search with regex pattern
             let list = match db.search([query].iter()) {
                 Ok(l) => l,
                 Err(e) => {
@@ -144,15 +149,23 @@ pub fn search_repo(
         }
     }
 
-    // Sort: repo order as in pacman.conf, then name
-    // Keep stable: already in db order; just sort alphabetically for consistency unless bottom_up
     results.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
-
     if limit != 0 && results.len() > limit {
         results.truncate(limit);
     }
-
     Ok(results)
+}
+
+pub fn search_repo(
+    query: &str,
+    limit: usize,
+    use_regex: bool,
+    installed_only: bool,
+) -> anyhow::Result<Vec<Package>> {
+    // Use cached config for performance — falls back to fresh parse if cache miss
+    let config = get_cached_config()
+        .or_else(|_| Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}")))?;
+    search_repo_with_config(&config, query, limit, use_regex, installed_only)
 }
 
 // Fallback when alpm fails — parses `pacman -Ss` output ( Butter fallback )

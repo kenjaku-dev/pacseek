@@ -1,7 +1,9 @@
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc::{self},
 };
+use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -42,6 +44,10 @@ pub struct App {
     pub should_quit: bool,
     pub needs_search: bool,
     pub last_input_change: Instant,
+    // Phase B: non-blocking search channel + dedup id per ratatui async skill
+    search_rx: Option<std::sync::mpsc::Receiver<(u64, Vec<Package>, String)>>,
+    search_id: u64,
+    next_search_id: u64,
 }
 
 impl App {
@@ -77,57 +83,98 @@ impl App {
             should_quit: false,
             needs_search: !initial_query.is_empty(),
             last_input_change: Instant::now(),
+            search_rx: None,
+            search_id: 0,
+            next_search_id: 0,
         }
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         // Best-effort signal handling — per tui-design lifecycle, ensure raw mode restored on SIGTERM/SIGINT
-        // Use signal-hook flag to quit loop gracefully and let tui/mod.rs restore
         let term_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
         {
             let flag = term_flag.clone();
             let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, flag.clone());
             let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, flag);
-            // SIGHUP not needed for TUI, but handle
             let _ = signal_hook::flag::register(signal_hook::consts::SIGHUP, term_flag.clone());
         }
 
-        // If initial query provided, do first search immediately (no debounce)
+        // If initial query provided, do first search immediately (no debounce) — now non-blocking
         if self.needs_search {
-            self.do_search(terminal)?;
+            self.trigger_search();
             self.needs_search = false;
         }
 
         while !self.should_quit {
-            // Check signal flag before draw — graceful exit will trigger restore in tui/mod.rs
             if term_flag.load(Ordering::Relaxed) {
                 self.should_quit = true;
                 break;
             }
+
+            // Poll for background search results before draw so spinner updates immediately
+            self.poll_search_results();
 
             terminal.draw(|f| ui::draw(f, self))?;
 
             // poll with timeout to allow debounce & spinner & signal check
             if event::poll(Duration::from_millis(200))? {
                 let ev = event::read()?;
-                // If popup is open, handle popup keys first
                 if self.handle_popup_event(&ev, terminal)? {
                     continue;
                 }
                 self.handle_event(&ev, terminal)?;
             }
 
+            // Also poll after handling event for immediate fetch after Enter
+            self.poll_search_results();
+
             // Debounced search: if input changed and 400ms passed without new key
             if self.focus == Focus::Search
                 && self.needs_search
                 && self.last_input_change.elapsed() > Duration::from_millis(400)
             {
-                self.do_search(terminal)?;
+                self.trigger_search();
                 self.needs_search = false;
             }
         }
         Ok(())
+    }
+
+    fn poll_search_results(&mut self) {
+        if let Some(rx) = &self.search_rx {
+            // Try to receive without blocking; handle multiple pending results (only latest matters)
+            while let Ok((id, pkgs, query)) = rx.try_recv() {
+                // Only accept latest search_id; discard stale
+                if id == self.search_id {
+                    let total = pkgs.len();
+                    let repo_count = pkgs.iter().filter(|p| p.repo != "aur").count();
+                    let aur_count = total.saturating_sub(repo_count);
+                    self.packages = pkgs;
+                    self.list_state.select(if self.packages.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    });
+                    self.is_loading = false;
+                    self.last_query = query.clone();
+                    if total == 0 {
+                        self.status = format!("No results for '{}'", query);
+                    } else {
+                        self.status =
+                            format!("Found {} (repo {} aur {})", total, repo_count, aur_count);
+                    }
+                } else {
+                    // Stale result, ignore but keep is_loading if newer still pending
+                    // If this stale was the last expected, don't clear loading
+                    tracing::debug!(
+                        id,
+                        search_id = self.search_id,
+                        "discard stale search result"
+                    );
+                }
+            }
+        }
     }
 
     fn handle_popup_event(&mut self, ev: &Event, terminal: &mut DefaultTerminal) -> Result<bool> {
@@ -300,67 +347,64 @@ impl App {
         self.list_state.select(Some(i));
     }
 
-    fn do_search(&mut self, _terminal: &mut DefaultTerminal) -> Result<()> {
+    // Phase B: non-blocking — spawn background thread, parallel repo+aur via OnceLock client & cached Config
+    pub(crate) fn trigger_search(&mut self) {
         let query = self.input.value().trim().to_string();
         if query.is_empty() {
             self.packages.clear();
             self.status = "Type a query and press Enter".into();
-            return Ok(());
+            self.is_loading = false;
+            self.search_rx = None;
+            return;
         }
         if query == self.last_query && !self.packages.is_empty() {
-            return Ok(());
+            self.is_loading = false;
+            return;
         }
         self.is_loading = true;
         self.status = format!("Searching for '{}'...", query);
-        // Draw loading state is handled by next loop, but we do blocking search now
-        // We need to temporarily restore? No, we show loading via UI, then block to fetch
-
-        // Use tokio runtime for AUR async — we are inside sync context, need to block
-        // Create a new runtime for blocking AUR call (cheap) or use handle if inside tokio
-        // Since App::run is not async, we use std::thread + block
-        // But we are called from tokio::main's sync TUI loop which is not inside runtime? It is inside tokio::main but TUI run is sync.
-        // We'll do blocking search using our existing sync fallback for repo and a blocking reqwest for AUR via tokio::runtime::Builder
-
+        // Increment search id for dedup (stale results ignored in poll_search_results)
+        self.next_search_id = self.next_search_id.wrapping_add(1);
+        self.search_id = self.next_search_id;
+        let search_id = self.search_id;
         let limit = self.limit;
-        // Repo search (blocking, uses alpm per aur-guides:aur-pacman)
-        let repo_res = {
-            let q = query.clone();
-            crate::search::repo::search_repo(&q, limit, false, false)
-                .or_else(|_| crate::search::repo::search_repo_fallback(&q, limit))
-                .unwrap_or_default()
-        };
+        let query_clone = query.clone();
 
-        // AUR search — blocking variant to avoid nested tokio runtime (aur-guides:aur-rpc)
-        let aur_res = {
-            let q = query.clone();
-            search_aur_blocking(&q, "name-desc", limit, false).unwrap_or_else(|e| {
-                tracing::warn!(err=?e, "AUR blocking search failed");
-                vec![]
-            })
-        };
+        let (tx, rx) = mpsc::channel();
+        self.search_rx = Some(rx);
 
-        // Merge per tui-design: repo first, aur after (or bottom_up? keep repo first for now)
-        let mut combined = Vec::with_capacity(repo_res.len() + aur_res.len());
-        combined.extend(repo_res);
-        combined.extend(aur_res);
+        // Spawn background worker — parallel repo+aur, uses cached Config & OnceLock client
+        thread::spawn(move || {
+            // Parallel repo vs aur via two inner join handles
+            let q1 = query_clone.clone();
+            let repo_handle = thread::spawn(move || {
+                crate::search::repo::search_repo(&q1, limit, false, false)
+                    .or_else(|_| crate::search::repo::search_repo_fallback(&q1, limit))
+                    .unwrap_or_default()
+            });
+            let q2 = query_clone.clone();
+            let aur_handle = thread::spawn(move || {
+                search_aur_blocking(&q2, "name-desc", limit, false).unwrap_or_else(|e| {
+                    tracing::warn!(err=?e, "AUR blocking search failed");
+                    vec![]
+                })
+            });
 
-        // Sort? Keep repo order + aur popularity already. Combined as repo+aur
-        self.packages = combined;
-        self.list_state.select(if self.packages.is_empty() {
-            None
-        } else {
-            Some(0)
+            let repo_res = repo_handle.join().unwrap_or_default();
+            let aur_res = aur_handle.join().unwrap_or_default();
+
+            let mut combined = Vec::with_capacity(repo_res.len() + aur_res.len());
+            combined.extend(repo_res);
+            combined.extend(aur_res);
+
+            // Send result; if receiver dropped (new search started), ignore
+            let _ = tx.send((search_id, combined, query_clone));
         });
-        self.is_loading = false;
-        self.last_query = query.clone();
-        let total = self.packages.len();
-        let repo_count = self.packages.iter().filter(|p| p.repo != "aur").count();
-        let aur_count = total - repo_count;
-        if total == 0 {
-            self.status = format!("No results for '{}'", query);
-        } else {
-            self.status = format!("Found {} (repo {} aur {})", total, repo_count, aur_count);
-        }
+    }
+
+    fn do_search(&mut self, _terminal: &mut DefaultTerminal) -> Result<()> {
+        // Keep API compat for handle_event and initial search; now non-blocking
+        self.trigger_search();
         Ok(())
     }
 
@@ -390,10 +434,40 @@ impl App {
                 self.popup = Popup::Message(format!("✗ Failed {}: {}", name, e));
             }
         }
-        // Refresh package list to update [installed] marker
-        if let Err(e) = self.do_search(terminal) {
-            self.status = format!("Search refresh failed: {}", e);
-        }
+        // Refresh package list to update [installed] marker — force even if query==last_query
+        self.last_query.clear();
+        self.trigger_search();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn trigger_search_is_non_blocking() {
+        let mut app = App::new("firefox".into());
+        let start = Instant::now();
+        app.trigger_search();
+        let elapsed = start.elapsed();
+        // Should return immediately without blocking on network/disk (background thread)
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "trigger_search should be non-blocking, took {:?}",
+            elapsed
+        );
+        assert!(app.is_loading, "should be loading after trigger");
+        // Poll should not panic even if no result yet
+        app.poll_search_results();
+    }
+
+    #[test]
+    fn trigger_search_empty_clears() {
+        let mut app = App::new("".into());
+        app.trigger_search();
+        assert!(!app.is_loading);
+        assert!(app.packages.is_empty());
     }
 }

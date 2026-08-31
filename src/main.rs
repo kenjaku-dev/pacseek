@@ -1,7 +1,6 @@
 use std::io::IsTerminal;
 
 use clap::Parser;
-use futures::future::join;
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -91,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         if matches!(cli.source, Source::Aur) {
             Vec::new()
         } else {
-            task::spawn_blocking(move || {
+            let res = task::spawn_blocking(move || {
                 match search_repo(&query_repo, limit_repo, regex_repo, installed_only) {
                     Ok(v) => v,
                     Err(e) => {
@@ -106,8 +105,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             })
-            .await
-            .unwrap_or_default()
+            .await;
+            match res {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(err=?e, "spawn_blocking JoinError (repo search panicked)");
+                    vec![]
+                }
+            }
         }
     };
 
@@ -154,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (repo_packages, aur_packages) = join(repo_future, aur_future).await;
+    let (repo_packages, aur_packages) = tokio::join!(repo_future, aur_future);
 
     if let Some(pb) = spinner {
         pb.finish_and_clear();

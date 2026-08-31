@@ -26,7 +26,6 @@ colored = "2"
 indicatif = "0.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-futures = "0.3"
 regex = "1"
 url = "2"
 # TUI stack — ratatui skill (0.30.1) + tui-design ecosystem-rust

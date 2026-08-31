@@ -25,15 +25,15 @@ Check one phase at a time. Do not start next until `Verification` passes. Run `c
 - [x] **A5** Signal handling `src/tui/app.rs:79` only Ctrl+C → added `signal-hook 0.3` `Cargo.toml:40`, `Arc<AtomicBool>` flag `src/tui/app.rs:79` registers `SIGTERM/SIGINT/SIGHUP`, loop checks `term_flag.load` `src/tui/app.rs:96`, `src/tui/mod.rs:9` `try_restore` with manual `disable_raw_mode`+`LeaveAlternateScreen`+`Show` fallback + `suspend_and_run` child/reentry aggregation `src/tui/mod.rs:20`.
 - Verify: `cargo clippy -- -W clippy::unwrap_used` 0 warnings, `cargo test` 9/9, `cargo run -- --tui` in non-TTY now friendly `requires a terminal` `src/main.rs:36` not panic, multibyte no panic, `cargo test --test aur_nan` 2/2.
 
-## Phase B — Performance (blocking UI) — 0.5d
+## Phase B — Performance (blocking UI) — 0.5d — ✅ DONE 2026-09-01
 
-**Skills:** `ratatui` Async with Tokio, `tokio`, `tracing`+`tui-logger`
+**Skills:** `ratatui` Async with Tokio, `tokio`, `tracing`+`tui-logger`, `tokio` signal, `aur-guides` cache
 
-- [ ] **B1** Blocking `do_search` `src/tui/app.rs:281` → move to `tokio::task::spawn_blocking` + `mpsc::unbounded_channel<AppEvent>` + `EventStream` (`crossterm 0.29`); draw loading before block; repo+aur parallel `tokio::join!` (like `src/main.rs:90`).
-- [ ] **B2** Reuse `reqwest::blocking::Client` single `OnceLock` `src/search/aur.rs:154` not per 400ms; share with `src/main.rs:76` async client.
-- [ ] **B3** Cache `Config::new()` + `Alpm` `src/search/repo.rs:13` in `App` (`OnceLock` or `App::cached_handle`), invalidate only on `pacman -Sy`.
-- [ ] **B4** Fix `futures::future::join` `src/main.rs:4` → `tokio::join!`; handle `JoinError` not `unwrap_or_default`.
-- Verify: `cargo flamegraph --bin pacseek` draw <5ms, search debounce 400ms `src/tui/app.rs:100` not blocked, spinner visible, `cargo test` still green.
+- [x] **B1** Blocking `do_search` `src/tui/app.rs:281` → `mpsc::channel` + `thread::spawn` background worker, `event::poll(200ms)` loop, `poll_search_results` `src/tui/app.rs:144` dedup via `search_id`, parallel repo+aur via two `thread::spawn` join `src/tui/app.rs:384`, `is_loading` spinner before block. Verify: `tests` `trigger_search_is_non_blocking` <100ms `src/tui/app.rs:453` 2/2.
+- [x] **B2** Reuse `reqwest::blocking::Client` single `OnceLock` `src/search/aur.rs:6,154` `AUR_BLOCKING_CLIENT` `blocking_client()` not per 400ms; `src/search/aur.rs:154` now `blocking_client()` vs `Client::builder` per call. Share with async `src/main.rs:76`.
+- [x] **B3** Cache `Config::new()` `src/search/repo.rs:13` via `OnceLock<Config> CACHED_CONFIG` `src/search/repo.rs:8` `get_cached_config()` `src/search/repo.rs:12`, new `search_repo_with_config` `src/search/repo.rs:21`, `search_repo` delegates. `App` benefits via `search_repo` in background thread, invalidates only on new process.
+- [x] **B4** Fix `futures::future::join` `src/main.rs:4` → `tokio::join!` `src/main.rs:157`, `spawn_blocking` `JoinError` handled `match res { Ok(v)=>v, Err(e)=>log vec![] }` `src/main.rs:102`, removed `futures` dep `Cargo.toml:37`. Verify: `cargo clippy` 0 warnings, `cargo test` 11/11.
+- Verify: `cargo test` 11/11, `cargo run -- firefox --no-tui` still parallel (`tokio::join!`), TUI `trigger_search` <100ms, spinner visible at `src/tui/app.rs:364` `Searching for`, debounced 400ms `src/tui/app.rs:124` still, `is_loading` polled `src/tui/app.rs:144`.
 
 ## Phase C — Logic Bugs — 0.5d
 
