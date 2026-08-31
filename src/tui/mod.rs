@@ -41,6 +41,7 @@ pub fn run_with_cli(initial_query: String, cli: &crate::cli::Cli) -> Result<()> 
 }
 
 // For suspending TUI to run child process (pacman/makepkg) — per tui-design lifecycle
+// Phase D4: flush + drain EventStream per ratatui recipe, both-fail aggregation already handled
 pub fn suspend_and_run<F, T>(terminal: &mut DefaultTerminal, f: F) -> color_eyre::Result<T>
 where
     F: FnOnce() -> anyhow::Result<T>,
@@ -55,25 +56,37 @@ where
         );
         eprintln!("suspend restore warning: {e}");
     }
+    // Drain any pending crossterm events that could be consumed during reinit (tui-design)
+    while crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+        let _ = crossterm::event::read();
+    }
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
     let child_result = f().map_err(|e| color_eyre::eyre::eyre!(e));
+
     // 2. Re-enter TUI — independent best-effort, per tui-design recipe (store child_result)
     let reinit = ratatui::try_init();
     match (child_result, reinit) {
         (Ok(v), Ok(t)) => {
             *terminal = t;
             let _ = terminal.clear();
+            // Flush and drain again after reentry
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            while crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+                let _ = crossterm::event::read();
+            }
             Ok(v)
         }
-        (Ok(_v), Err(e)) => {
-            // Child succeeded but reentry failed — report reentry
-            Err(color_eyre::eyre::eyre!(
-                "reentry failed after child success: {e}"
-            ))
-        }
+        (Ok(_v), Err(e)) => Err(color_eyre::eyre::eyre!(
+            "reentry failed after child success: {e}"
+        )),
         (Err(e), Ok(t)) => {
-            // Child failed, but reentry ok — restore and return child error
             *terminal = t;
             let _ = terminal.clear();
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            while crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+                let _ = crossterm::event::read();
+            }
             Err(e)
         }
         (Err(e1), Err(e2)) => Err(color_eyre::eyre::eyre!(

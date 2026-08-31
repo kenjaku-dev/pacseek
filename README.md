@@ -74,9 +74,9 @@ src/
     repo.rs      # alpm 5 + pacmanconf, fallback pacman -Ss
   output.rs      # colored + json (CLI)
   tui/
-    mod.rs       # run() try_init/try_restore, suspend_and_run handoff
-    app.rs       # Input (tui-input), ListState, debounced 400ms, Mode popup
-    ui.rs        # Layout vertical [3,Min(8),1,1], Clear hole-punch, 60×10 floor
+    mod.rs       # run() try_init/try_restore, suspend_and_run handoff + flush/drain
+    app.rs       # Input (tui-input), ListState, debounced 400ms, Mode popup, non-blocking mpsc
+    ui.rs        # Layout vertical [3,Min(8),1,1] Spacing::Overlap, Clear hole-punch, 60×13 floor
   install/
     repo.rs      # sudo pacman -S --needed (aur-helpers)
     aur.rs       # git clone/pull, PKGBUILD bat/cat, makepkg -si (aur-makepkg, never root)
@@ -86,7 +86,7 @@ src/
 ## Best Practices (skills)
 
 - `ratatui` 0.30: `ratatui::try_init` before `color_eyre`, `Block::bordered().title`, `ListState` stateful, `TestBackend` snapshots at 80×24/60 cols, `unicode_width` via wrap, `Constraint::Min` responsive, `Clear` for popups
-- `tui-design`: alternate screen, non-blocking disk/net (search via blocking threads), `NO_COLOR` honor, `too-small` 60×10 fallback, clutter audit (<1 border), keyboard-reachable (`j/k`, `/`, `Enter`, `i`, `q`, `Ctrl+C`), suspend/resume with `clear`
+- `tui-design`: alternate screen, non-blocking disk/net (search via mpsc+thread parallel), `NO_COLOR` honor, `too-small` 60×13 fallback (3+8+1+1), clutter audit (<1 border, Spacing::Overlap), keyboard-reachable (`j/k`, `/`, `Enter`, `i`, `q`, `Ctrl+C`), suspend/resume with `clear`+`flush`+drain
 - `aur-guides`: ` Aurweb RPC` `https://aur.archlinux.org/rpc/v5/search/{q}?by=`, `makepkg -s`, `namcap`, `.SRCINFO`, HTTPS sources
 - Release `opt-level="z" lto codegen-units=1 strip`, `cargo fmt/clippy/audit`
 

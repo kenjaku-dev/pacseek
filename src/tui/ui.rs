@@ -13,9 +13,9 @@ use super::app::{App, Focus, Popup};
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
 
-    // Responsive floor: 60x24 minimum per tui-design visual-patterns
-    if area.width < 60 || area.height < 10 {
-        let msg = Paragraph::new("Terminal too small — need ≥60×10")
+    // Responsive floor: 60×13 minimum (3 search + 8 results +1 status +1 help) per tui-design responsive + layout Min(8)
+    if area.width < 60 || area.height < 13 {
+        let msg = Paragraph::new("Terminal too small — need ≥60×13")
             .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
@@ -24,8 +24,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         return;
     }
 
-    // Layout: vertical [search 3][results min(0)][status 1][help 1]
-    // Clutter audit: only results and search have borders, status/help are borderless to keep chrome <20% cells
+    // Layout: vertical [search 3][results min(0)][status 1][help 1] — clutter audit: status/help borderless keeps chrome <20%
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -480,20 +479,10 @@ fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = ratatui::layout::Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-    ratatui::layout::Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+    // Phase D5: cache-free, no Layout alloc — manual centered math (vs 2 Layout splits before)
+    let popup_width = r.width * percent_x / 100;
+    let popup_height = r.height * percent_y / 100;
+    let popup_x = r.x + (r.width.saturating_sub(popup_width)) / 2;
+    let popup_y = r.y + (r.height.saturating_sub(popup_height)) / 2;
+    Rect::new(popup_x, popup_y, popup_width, popup_height)
 }

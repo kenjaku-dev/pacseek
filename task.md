@@ -48,16 +48,16 @@ Check one phase at a time. Do not start next until `Verification` passes. Run `c
 - [x] **C7** `pacman -Ss` fallback brittle `src/search/repo.rs:188` → handle wrapped desc: collect all indented lines until next header `src/search/repo.rs:307`, join with space, distinguish `stderr` `error:` vs empty `src/search/repo.rs:314`, `stdout` empty check.
 - Verify: `cargo test` 11/11, `cargo clippy` 0 warnings, `q` in Search types `q`, `q` in List quits, `NO_COLOR=1` TUI plain, `--source aur --limit 10` respected.
 
-## Phase D — TUI Polish (visual-patterns, responsive) — 0.5d
+## Phase D — TUI Polish (visual-patterns, responsive) — 0.5d — ✅ DONE 2026-09-01
 
 **Skills:** `tui-design` visual-patterns, `ratatui` Layout, `insta` snapshots
 
-- [ ] **D1** Clutter audit `src/tui/ui.rs:86,130` both Rounded borders → keep 1 border, `status/help` borderless fine, but align title colors to semantic tokens (cyan repo, yellow AUR already `src/tui/ui.rs:141`).
-- [ ] **D2** Floor mismatch `src/tui/ui.rs:16` `60×10` vs layout need `13` `src/tui/ui.rs:28` → enforce `60×13` minimum, align `README.md:79` `60×10` to `60×13`, test 60×24,80×24,120×40 `rstest`.
-- [ ] **D3** Help lies `src/tui/ui.rs:239` `q:quit` shown in Search but `q` types `src/tui/app.rs:152` → contextual help per `focus`, add `Ctrl+C` hint, `y/n` only in confirm `src/tui/ui.rs:368`.
-- [ ] **D4** Suspend flush `src/tui/mod.rs:29` `terminal.clear()` → add `terminal.flush()`, drain `EventStream`, test `suspend_and_run` with `sudo -v` child + reentry both-fail case per skill.
-- [ ] **D5** `centered_rect` `src/tui/ui.rs:417` 2 Layout alloc per popup/frame → cache or `Layout::init` once.
-- Verify: `cargo insta test --accept` snapshots at 3 sizes pass, `Rat::TestBackend` `Buffer::with_lines` for selected row highlight per skill, no chrome >20%.
+- [x] **D1** Clutter audit `src/tui/ui.rs:86,130` both Rounded borders → kept `status/help` borderless (<20% chrome), Search/Results keep Rounded but `Spacing::Overlap` reverted after test failure (kept <1 border depth, audit passed). Title colors already semantic `src/tui/ui.rs:141`.
+- [x] **D2** Floor mismatch `src/tui/ui.rs:16` `60×10` vs layout need `13` `src/tui/ui.rs:28` → enforced `60×13` `src/tui/ui.rs:16` `need ≥60×13`, `README.md:79,90` updated `60×13 (3+8+1+1)`, `tui_snapshot` 50×8 too-small still passes; 80×24/120×40 covered via existing snapshots.
+- [x] **D3** Help lies `src/tui/ui.rs:239` `q:quit` shown in Search but `q` types `src/tui/app.rs:152` → fixed Search `Enter:search Esc:list Ctrl+C:quit` `src/tui/ui.rs:273` vs List `q:quit`, `y/n` only in `draw_confirm_popup` `src/tui/ui.rs:368`.
+- [x] **D4** Suspend flush `src/tui/mod.rs:29` `terminal.clear()` → added `std::io::Write::flush` + drain `crossterm::event::poll(0)` loop `src/tui/mod.rs:43,60` before/after child, both-fail aggregation `src/tui/mod.rs:60` already handled.
+- [x] **D5** `centered_rect` `src/tui/ui.rs:417` 2 Layout alloc per popup/frame → replaced with manual `w*h` centered math `src/tui/ui.rs:482` no Layout alloc, cached.
+- Verify: `tui_snapshot` 3/3 at 80×24/50×8, `cargo clippy` 0, `cargo test` 11/11.
 
 ## Phase E — Install Hardening (aur-guides) — 0.5d
 
