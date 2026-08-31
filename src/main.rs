@@ -141,12 +141,12 @@ async fn main() -> anyhow::Result<()> {
 
     let spinner = if !cli.json && cli.verbose == 0 {
         let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
-                .template("{spinner:.cyan} {msg}")
-                .unwrap(),
-        );
+        // unwrap safe: template is static, fallback to default if invalid (rust-common-pitfalls: avoid unwrap on main with panic=abort)
+        let style = ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+            .template("{spinner:.cyan} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner());
+        pb.set_style(style);
         pb.set_message(format!("Searching for '{}'...", query));
         pb.enable_steady_tick(std::time::Duration::from_millis(80));
         Some(pb)

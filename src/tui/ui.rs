@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, Focus, Popup};
 
@@ -63,17 +64,28 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 
     let input_str = app.input.value();
     let width = area.width.saturating_sub(4) as usize; // borders + padding
-    let display = if input_str.len() > width && width > 3 {
-        // show tail
-        format!(
-            "...{}",
-            &input_str[input_str.len().saturating_sub(width - 3)..]
-        )
+    // width-aware tail truncation, char-boundary safe per rust-common-pitfalls
+    let input_width = input_str.width();
+    let display = if input_width > width && width > 3 {
+        let target = width.saturating_sub(3);
+        let mut w = 0usize;
+        let mut start_idx = input_str.len();
+        // Walk from end, collect width until target — char-boundary safe
+        for (idx, ch) in input_str.char_indices().rev() {
+            let cw = ch.width().unwrap_or(0);
+            if w + cw > target {
+                break;
+            }
+            w += cw;
+            start_idx = idx;
+        }
+        // start_idx is already at char boundary from char_indices
+        format!("...{}", &input_str[start_idx..])
     } else {
         input_str.to_string()
     };
 
-    // Cursor position for tui-input
+    // Cursor position for tui-input (visual width, not byte index)
     let cursor_pos = app.input.visual_cursor();
 
     let paragraph = Paragraph::new(display)
@@ -312,11 +324,12 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
                 "  Popularity: {:.2}",
                 pkg.popularity.unwrap_or(0.0)
             )),
-            Span::raw(if pkg.maintainer.is_some() {
-                format!("  Maintainer: {}", pkg.maintainer.as_deref().unwrap())
-            } else {
-                "".into()
-            }),
+            Span::raw(
+                pkg.maintainer
+                    .as_deref()
+                    .map(|m| format!("  Maintainer: {}", m))
+                    .unwrap_or_default(),
+            ),
         ]),
         Line::from(vec![Span::styled(
             if pkg.out_of_date.is_some() {

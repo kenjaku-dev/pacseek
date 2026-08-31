@@ -36,6 +36,8 @@ color-eyre = "0.6"
 tui-input = "0.15"
 dirs = "5"
 nix = { version = "0.29", features = ["user"] }
+unicode-width = "0.2"
+signal-hook = "0.3"
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -47,7 +49,9 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# panic = "abort" disabled for TUI stability — color_eyre hook needs unwind to restore terminal (tui-design lifecycle)
+# keep unwind so raw/altscreen restored on panic; use `cargo build --release` still stripped and small
+panic = "unwind"
 
 [profile.dev]
 opt-level = 0

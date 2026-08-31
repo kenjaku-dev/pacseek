@@ -116,5 +116,7 @@ fn print_package(pkg: &Package, kind: &str) {
 
 pub fn print_json_error(msg: &str) {
     let v = serde_json::json!({"error": msg});
-    eprintln!("{}", serde_json::to_string_pretty(&v).unwrap());
+    let s =
+        serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!(r#"{{"error":"{}"}}"#, msg));
+    eprintln!("{}", s);
 }

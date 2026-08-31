@@ -1,3 +1,7 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -77,6 +81,18 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        // Best-effort signal handling — per tui-design lifecycle, ensure raw mode restored on SIGTERM/SIGINT
+        // Use signal-hook flag to quit loop gracefully and let tui/mod.rs restore
+        let term_flag = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        {
+            let flag = term_flag.clone();
+            let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, flag.clone());
+            let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, flag);
+            // SIGHUP not needed for TUI, but handle
+            let _ = signal_hook::flag::register(signal_hook::consts::SIGHUP, term_flag.clone());
+        }
+
         // If initial query provided, do first search immediately (no debounce)
         if self.needs_search {
             self.do_search(terminal)?;
@@ -84,9 +100,15 @@ impl App {
         }
 
         while !self.should_quit {
+            // Check signal flag before draw — graceful exit will trigger restore in tui/mod.rs
+            if term_flag.load(Ordering::Relaxed) {
+                self.should_quit = true;
+                break;
+            }
+
             terminal.draw(|f| ui::draw(f, self))?;
 
-            // poll with timeout to allow debounce & spinner
+            // poll with timeout to allow debounce & spinner & signal check
             if event::poll(Duration::from_millis(200))? {
                 let ev = event::read()?;
                 // If popup is open, handle popup keys first

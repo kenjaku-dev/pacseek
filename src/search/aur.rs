@@ -123,11 +123,12 @@ pub async fn search_aur(
     }
 
     // Sort by popularity/votes desc like paru does (more trusted first), but keep original if bottom_up false
+    // NaN-safe: filter non-finite to 0.0 and use unwrap_or Equal per rust-common-pitfalls
     results.sort_by(|a, b| {
-        b.popularity
-            .unwrap_or(0.0)
-            .partial_cmp(&a.popularity.unwrap_or(0.0))
-            .unwrap()
+        let ap = a.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        let bp = b.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        bp.partial_cmp(&ap)
+            .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
     });
 
@@ -189,10 +190,10 @@ pub fn search_aur_blocking(
         });
     }
     results.sort_by(|a, b| {
-        b.popularity
-            .unwrap_or(0.0)
-            .partial_cmp(&a.popularity.unwrap_or(0.0))
-            .unwrap()
+        let ap = a.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        let bp = b.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        bp.partial_cmp(&ap)
+            .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
     });
     if limit != 0 && results.len() > limit {
