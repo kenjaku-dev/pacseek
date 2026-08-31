@@ -43,9 +43,9 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // Popups on top with Clear hole-punch
     match &app.popup {
-        Popup::Info(pkg) => draw_info_popup(f, pkg, area),
-        Popup::Confirm(pkg) => draw_confirm_popup(f, pkg, area),
-        Popup::Message(msg) => draw_message_popup(f, msg, area),
+        Popup::Info(pkg) => draw_info_popup(f, pkg, area, app),
+        Popup::Confirm(pkg) => draw_confirm_popup(f, pkg, area, app),
+        Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
     }
 }
@@ -56,7 +56,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     } else {
         " Search (press / to focus) "
     };
-    let style = if app.focus == Focus::Search {
+    let style = if app.no_color {
+        Style::default()
+    } else if app.focus == Focus::Search {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -146,11 +148,14 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let use_color = !app.no_color;
     let items: Vec<ListItem> = app
         .packages
         .iter()
         .map(|pkg| {
-            let repo_style = if pkg.repo == "aur" {
+            let repo_style = if !use_color {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else if pkg.repo == "aur" {
                 Style::default()
                     .fg(Color::Magenta)
                     .add_modifier(Modifier::BOLD)
@@ -171,9 +176,13 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let installed = if pkg.installed {
                 Span::styled(
                     " [installed]",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
+                    if use_color {
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().add_modifier(Modifier::BOLD)
+                    },
                 )
             } else {
                 Span::raw("")
@@ -188,7 +197,11 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 };
                 Span::styled(
                     format!(" (+{} {:.2}){}", votes, pop, ood),
-                    Style::default().fg(Color::Yellow),
+                    if use_color {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    },
                 )
             } else {
                 Span::raw("")
@@ -198,16 +211,23 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!("{}/{}", pkg.repo, pkg.name), repo_style),
                 Span::styled(
                     format!(" {}", pkg.version),
-                    Style::default().fg(Color::White),
+                    if use_color {
+                        Style::default().fg(Color::White)
+                    } else {
+                        Style::default()
+                    },
                 ),
                 aur_extra,
                 installed,
             ]);
 
-            // Use unicode_width-aware truncation via ratatui wrap, not manual len()
             let second = Line::from(vec![Span::styled(
                 format!("  {}", pkg.description.as_deref().unwrap_or("-")),
-                Style::default().fg(Color::DarkGray),
+                if use_color {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default()
+                },
             )]);
 
             ListItem::new(vec![first, second])
@@ -221,12 +241,14 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .title(title),
         )
-        .highlight_style(
+        .highlight_style(if use_color {
             Style::default()
                 .bg(Color::DarkGray)
                 .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED)
+        })
         .highlight_symbol("▸ ");
 
     // ListState is stateful per ecosystem-rust.md
@@ -235,7 +257,9 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let style = if app.is_loading {
+    let style = if app.no_color {
+        Style::default()
+    } else if app.is_loading {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::Gray)
@@ -246,19 +270,23 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    // Discoverability per tui-design: contextual hints, not hidden
+    // Discoverability per tui-design: contextual hints, not hidden — fixed C1 lie: Search no longer shows q:quit
     let help = if app.focus == Focus::Search {
-        " Enter:search  Esc:list  q:quit  (type to filter)"
+        " Enter:search  Esc:list  Ctrl+C:quit  (type to filter)"
     } else {
         " ↑↓/j k:navigate  Enter:install  i:info  /:search  q:quit "
     };
     let p = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
         .block(Block::default());
     f.render_widget(p, area);
 }
 
-fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
+fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: &App) {
     let popup_area = centered_rect(70, 60, area);
     f.render_widget(Clear, popup_area);
 
@@ -266,8 +294,16 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
         .title(format!(" {} / {} ", pkg.repo, pkg.name))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().fg(Color::Yellow)
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().bg(Color::Black)
+        });
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -352,15 +388,23 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
     f.render_widget(p, inner);
 }
 
-fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
+fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: &App) {
     let popup_area = centered_rect(60, 30, area);
     f.render_widget(Clear, popup_area);
     let block = Block::default()
         .title(" Confirm install ")
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().fg(Color::Yellow)
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().bg(Color::Black)
+        });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     let text = vec![
@@ -405,19 +449,27 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect) {
     f.render_widget(p, inner);
 }
 
-fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect) {
+fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
     let popup_area = centered_rect(60, 20, area);
     f.render_widget(Clear, popup_area);
     let block = Block::default()
         .title(" Message ")
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(if msg.starts_with('✓') {
-            Color::Green
+        .border_style(if app.no_color {
+            Style::default()
         } else {
-            Color::Red
-        }))
-        .style(Style::default().bg(Color::Black));
+            Style::default().fg(if msg.starts_with('✓') {
+                Color::Green
+            } else {
+                Color::Red
+            })
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            Style::default().bg(Color::Black)
+        });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     let p = Paragraph::new(msg.to_string())

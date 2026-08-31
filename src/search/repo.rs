@@ -169,6 +169,7 @@ pub fn search_repo(
 }
 
 // Fallback when alpm fails — parses `pacman -Ss` output ( Butter fallback )
+// Handles wrapped descriptions (multiple lines) and distinguishes no-results vs error
 pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Package>> {
     use std::process::Command;
     let output = Command::new("pacman")
@@ -176,15 +177,25 @@ pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pac
         .output()
         .map_err(|e| anyhow::anyhow!("failed to run pacman -Ss: {e}"))?;
     if !output.status.success() {
-        // pacman returns non-zero when no results, treat as empty
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // pacman -Ss returns 1 when no results, but also on error; check stderr for real errors
+        if stderr.contains("error:") || stderr.contains("failed") {
+            tracing::warn!(stderr=%stderr, "pacman -Ss error");
+            // Still return empty for TUI, but log
+        }
+        // No results or error -> empty
         return Ok(vec![]);
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut results = Vec::new();
     let mut lines = stdout.lines().peekable();
     while let Some(line) = lines.next() {
-        // line format: "extra/firefox 123.0-1 [installed]"
-        if !line.contains('/') {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Package header always contains '/' and is not indented (desc lines are indented with 4 spaces)
+        // But also check: if line starts with whitespace, it's continuation of previous desc, not header
+        if line.starts_with(' ') || line.starts_with('\t') || !line.contains('/') {
             continue;
         }
         let mut parts = line.splitn(2, ' ');
@@ -198,13 +209,26 @@ pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pac
             .unwrap_or("")
             .to_string();
         let installed = line.contains("[installed");
-        let desc = lines.peek().map(|l| l.trim().to_string());
-        // consume desc line if it doesn't look like a package header
-        if let Some(peek) = lines.peek() {
-            if !peek.contains('/') {
-                lines.next();
+        // Collect all following indented lines as description (may be wrapped across multiple lines)
+        let mut desc_parts: Vec<String> = Vec::new();
+        while let Some(peek) = lines.peek() {
+            if peek.contains('/') && !peek.starts_with(' ') && !peek.starts_with('\t') {
+                // Next package header
+                break;
             }
+            if peek.trim().is_empty() {
+                lines.next();
+                continue;
+            }
+            // It's a description line (indented)
+            desc_parts.push(peek.trim().to_string());
+            lines.next();
         }
+        let desc = if desc_parts.is_empty() {
+            None
+        } else {
+            Some(desc_parts.join(" "))
+        };
         results.push(Package {
             name: name.to_string(),
             version,

@@ -11,6 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, widgets::ListState};
 use tui_input::{Input, backend::crossterm::EventHandler};
 
+use crate::cli::{AurBy, Source};
 use crate::model::Package;
 use crate::search::aur::search_aur_blocking;
 
@@ -41,6 +42,11 @@ pub struct App {
     pub initial_query: String,
     pub last_query: String,
     pub limit: usize,
+    pub source: Source,
+    pub aur_by: AurBy,
+    pub use_regex: bool,
+    pub installed_only: bool,
+    pub no_color: bool,
     pub should_quit: bool,
     pub needs_search: bool,
     pub last_input_change: Instant,
@@ -63,7 +69,7 @@ impl App {
             }
         }
         let mut list_state = ListState::default();
-        list_state.select(Some(0));
+        list_state.select(None);
         Self {
             input,
             packages: Vec::new(),
@@ -80,6 +86,11 @@ impl App {
             initial_query: initial_query.clone(),
             last_query: String::new(),
             limit: 50,
+            source: Source::All,
+            aur_by: AurBy::NameDesc,
+            use_regex: false,
+            installed_only: false,
+            no_color: std::env::var("NO_COLOR").is_ok(),
             should_quit: false,
             needs_search: !initial_query.is_empty(),
             last_input_change: Instant::now(),
@@ -87,6 +98,17 @@ impl App {
             search_id: 0,
             next_search_id: 0,
         }
+    }
+
+    pub fn new_with_cli(initial_query: String, cli: &crate::cli::Cli) -> Self {
+        let mut app = Self::new(initial_query);
+        app.limit = cli.limit;
+        app.source = cli.source;
+        app.aur_by = cli.by;
+        app.use_regex = cli.regex;
+        app.installed_only = cli.installed_only;
+        app.no_color = cli.no_color || std::env::var("NO_COLOR").is_ok();
+        app
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -227,12 +249,11 @@ impl App {
                     self.should_quit = true;
                 }
                 KeyCode::Esc => {
+                    // Popup already handled in handle_popup_event, so here popup==None
+                    // Toggle focus between Search and List
                     if self.focus == Focus::Search {
                         self.focus = Focus::List;
-                    } else if self.popup != Popup::None {
-                        self.popup = Popup::None;
                     } else {
-                        // Esc in list goes to search
                         self.focus = Focus::Search;
                     }
                 }
@@ -348,6 +369,7 @@ impl App {
     }
 
     // Phase B: non-blocking — spawn background thread, parallel repo+aur via OnceLock client & cached Config
+    // Phase C: respect CLI filters (source, by, regex, installed_only, limit) per tui audit
     pub(crate) fn trigger_search(&mut self) {
         let query = self.input.value().trim().to_string();
         if query.is_empty() {
@@ -363,41 +385,56 @@ impl App {
         }
         self.is_loading = true;
         self.status = format!("Searching for '{}'...", query);
-        // Increment search id for dedup (stale results ignored in poll_search_results)
         self.next_search_id = self.next_search_id.wrapping_add(1);
         self.search_id = self.next_search_id;
         let search_id = self.search_id;
         let limit = self.limit;
+        let source = self.source;
+        let aur_by = self.aur_by;
+        let use_regex = self.use_regex;
+        let installed_only = self.installed_only;
         let query_clone = query.clone();
 
         let (tx, rx) = mpsc::channel();
         self.search_rx = Some(rx);
 
-        // Spawn background worker — parallel repo+aur, uses cached Config & OnceLock client
         thread::spawn(move || {
-            // Parallel repo vs aur via two inner join handles
+            let aur_by_str = aur_by.as_str().to_string();
+            // Spawn repo and aur in parallel, respecting source filter
             let q1 = query_clone.clone();
-            let repo_handle = thread::spawn(move || {
-                crate::search::repo::search_repo(&q1, limit, false, false)
-                    .or_else(|_| crate::search::repo::search_repo_fallback(&q1, limit))
-                    .unwrap_or_default()
-            });
+            let repo_handle = if matches!(source, Source::Aur) {
+                None
+            } else {
+                Some(thread::spawn(move || {
+                    crate::search::repo::search_repo(&q1, limit, use_regex, installed_only)
+                        .or_else(|_| crate::search::repo::search_repo_fallback(&q1, limit))
+                        .unwrap_or_default()
+                }))
+            };
             let q2 = query_clone.clone();
-            let aur_handle = thread::spawn(move || {
-                search_aur_blocking(&q2, "name-desc", limit, false).unwrap_or_else(|e| {
-                    tracing::warn!(err=?e, "AUR blocking search failed");
-                    vec![]
-                })
-            });
+            let aur_handle = if matches!(source, Source::Repo) || installed_only {
+                None
+            } else {
+                Some(thread::spawn(move || {
+                    search_aur_blocking(&q2, &aur_by_str, limit, use_regex).unwrap_or_else(|e| {
+                        tracing::warn!(err=?e, "AUR blocking search failed");
+                        vec![]
+                    })
+                }))
+            };
 
-            let repo_res = repo_handle.join().unwrap_or_default();
-            let aur_res = aur_handle.join().unwrap_or_default();
+            let repo_res = repo_handle
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
+            let aur_res = aur_handle
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
 
             let mut combined = Vec::with_capacity(repo_res.len() + aur_res.len());
+            // Respect source order: repo first unless bottom_up handled in UI; keep repo+aur
             combined.extend(repo_res);
             combined.extend(aur_res);
 
-            // Send result; if receiver dropped (new search started), ignore
             let _ = tx.send((search_id, combined, query_clone));
         });
     }
@@ -468,6 +505,68 @@ mod tests {
         let mut app = App::new("".into());
         app.trigger_search();
         assert!(!app.is_loading);
+        assert!(app.packages.is_empty());
+    }
+
+    #[test]
+    fn q_in_search_does_not_quit() {
+        let mut app = App::new("".into());
+        app.focus = Focus::Search;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('q'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert!(!app.should_quit, "q in Search should type, not quit");
+        assert_eq!(app.input.value(), "q");
+    }
+
+    #[test]
+    fn q_in_list_quits() {
+        let mut app = App::new("firefox".into());
+        app.focus = Focus::List;
+        app.popup = Popup::None;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('q'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert!(app.should_quit, "q in List should quit");
+    }
+
+    #[test]
+    fn new_with_cli_respects_filters() {
+        let cli = crate::cli::Cli {
+            query: Some("test".into()),
+            tui: false,
+            no_tui: false,
+            source: crate::cli::Source::Aur,
+            by: crate::cli::AurBy::Name,
+            limit: 10,
+            json: false,
+            regex: true,
+            installed_only: true,
+            bottom_up: false,
+            verbose: 0,
+            no_color: true,
+        };
+        let app = App::new_with_cli("test".into(), &cli);
+        assert_eq!(app.limit, 10);
+        assert_eq!(app.source, crate::cli::Source::Aur);
+        assert_eq!(app.aur_by, crate::cli::AurBy::Name);
+        assert!(app.use_regex);
+        assert!(app.installed_only);
+        assert!(app.no_color);
+    }
+
+    #[test]
+    fn list_state_none_on_empty() {
+        let app = App::new("".into());
+        assert_eq!(app.list_state.selected(), None);
         assert!(app.packages.is_empty());
     }
 }

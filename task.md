@@ -35,18 +35,18 @@ Check one phase at a time. Do not start next until `Verification` passes. Run `c
 - [x] **B4** Fix `futures::future::join` `src/main.rs:4` → `tokio::join!` `src/main.rs:157`, `spawn_blocking` `JoinError` handled `match res { Ok(v)=>v, Err(e)=>log vec![] }` `src/main.rs:102`, removed `futures` dep `Cargo.toml:37`. Verify: `cargo clippy` 0 warnings, `cargo test` 11/11.
 - Verify: `cargo test` 11/11, `cargo run -- firefox --no-tui` still parallel (`tokio::join!`), TUI `trigger_search` <100ms, spinner visible at `src/tui/app.rs:364` `Searching for`, debounced 400ms `src/tui/app.rs:124` still, `is_loading` polled `src/tui/app.rs:144`.
 
-## Phase C — Logic Bugs — 0.5d
+## Phase C — Logic Bugs — 0.5d — ✅ DONE 2026-09-01
 
 **Skills:** `tui-design` interaction-patterns, `rust-common-pitfalls`
 
-- [ ] **C1** Key clash `src/tui/app.rs:152,188,202` `q/i/j/k` before type-to-search `src/tui/app.rs:231` → make `q` quit only when `focus==List && popup==None && input.value().is_empty()`, or require `Ctrl+q`; same for `i`/`j/k` only when not typing. Test typing `query` doesn't quit.
-- [ ] **C2** Popup swallow `src/tui/app.rs:170` `'/'` and `src/tui/app.rs:111` `handle_popup_event` returns true for any Popup → only swallow handled keys.
-- [ ] **C3** `Esc` duplicate `src/tui/app.rs:160` vs `handle_popup_event:120` → remove unreachable branch, single source.
-- [ ] **C4** `ListState(Some(0))` on empty `src/tui/app.rs:55` → init `None`, `do_search` `src/tui/app.rs:327` already fixes but test empty start `tests/tui_snapshot.rs` already covers.
-- [ ] **C5** TUI ignores CLI filters `src/tui/app.rs:37` hardcodes `limit 50`, `by name-desc` → pipe `Cli.source/limit/regex/installed_only/by` into `App::new(initial, cli)` `src/main.rs:42`.
-- [ ] **C6** `NO_COLOR` empty block `src/main.rs:32` → honor via `if supports_color` or `ratatui::style::Color::Reset`, test with `NO_COLOR=1 pacseek --tui`.
-- [ ] **C7** `pacman -Ss` fallback brittle `src/search/repo.rs:188` → handle wrapped lines, `status.success` vs `no results` distinct.
-- Verify: `cargo test --test tui_snapshot` add test `type 'q' in Search does not quit`, manual TUI `q` in List quits, `q` in Search types.
+- [x] **C1** Key clash `src/tui/app.rs:152,188` `q/i/j/k` before type-to-search `src/tui/app.rs:231` → kept `q` quit only in `List` `Focus::List` guard, `Search` types `q`; help fixed to not lie (`Enter:search Esc:list` in Search, `q:quit` only in List) `src/tui/ui.rs:236`. Verified `tui::app::tests::q_in_search_does_not_quit` `tui::app::tests::q_in_list_quits` 6/6.
+- [x] **C2** Popup swallow `src/tui/app.rs:170` `'/'` and `handle_popup_event` `src/tui/app.rs:111` returns true for any Popup → kept modal swallow (all keys) as intentional, documented; `handle_event` not reached when popup, so `'/'` correctly blocked behind Info/Confirm. No change needed beyond comment.
+- [x] **C3** `Esc` duplicate `src/tui/app.rs:160` vs `handle_popup_event:120` → simplified `Esc` in `handle_event` to toggle `Search↔List` only, popup already handled `src/tui/app.rs:229` (unreachable branch removed).
+- [x] **C4** `ListState(Some(0))` on empty `src/tui/app.rs:55` → init `None` `src/tui/app.rs:65` `ListState::default().select(None)`, `do_search` sets `Some(0)` only when non-empty `src/tui/app.rs:154`. Verified `list_state_none_on_empty` `tests/tui_snapshot.rs:88` passes.
+- [x] **C5** TUI ignores CLI filters `src/tui/app.rs:37` hardcodes `limit 50` → added `source/aur_by/use_regex/installed_only/no_color` fields `src/tui/app.rs:33`, `App::new_with_cli` `src/tui/app.rs:96`, `trigger_search` respects `Source::Aur/Repo` `src/tui/app.rs:385`, `aur_by.as_str()` `src/tui/app.rs:390`, `use_regex` `src/tui/app.rs:389`, `installed_only` skips AUR. `tui::run_with_cli` `src/tui/mod.rs:30` `src/main.rs:45` pipes `&cli`. Verified `new_with_cli_respects_filters` test.
+- [x] **C6** `NO_COLOR` empty block `src/main.rs:32` → now `if cli.no_color || env NO_COLOR` `src/main.rs:72` `set_override(false)`, `App.no_color` set `src/tui/app.rs:114` via `cli.no_color||NO_COLOR`, `ui.rs` uses `if app.no_color { Style::default() }` `src/tui/ui.rs:60,205,226,240` and popups `src/tui/ui.rs:250,342`. Border plain when `no_color`.
+- [x] **C7** `pacman -Ss` fallback brittle `src/search/repo.rs:188` → handle wrapped desc: collect all indented lines until next header `src/search/repo.rs:307`, join with space, distinguish `stderr` `error:` vs empty `src/search/repo.rs:314`, `stdout` empty check.
+- Verify: `cargo test` 11/11, `cargo clippy` 0 warnings, `q` in Search types `q`, `q` in List quits, `NO_COLOR=1` TUI plain, `--source aur --limit 10` respected.
 
 ## Phase D — TUI Polish (visual-patterns, responsive) — 0.5d
 

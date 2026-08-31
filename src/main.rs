@@ -28,10 +28,6 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if should_tui {
-        // Respect NO_COLOR for TUI
-        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
-            // ratatui will handle via style, but we set flag
-        }
         if !is_tty {
             eprintln!("Error: --tui requires a terminal (TTY).");
             eprintln!("Try: pacseek <query> --no-tui   or   pacseek --help");
@@ -40,8 +36,7 @@ async fn main() -> anyhow::Result<()> {
         }
         let initial = cli.query.clone().unwrap_or_default();
         // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
-        // Need to drop tracing subscriber that may write to stdout? Keep it quiet for TUI
-        return pacseek::tui::run(initial).map_err(|e| anyhow::anyhow!("{e}"));
+        return pacseek::tui::run_with_cli(initial, &cli).map_err(|e| anyhow::anyhow!("{e}"));
     }
 
     // --- CLI one-shot mode (existing) ---
@@ -68,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         .without_time()
         .init();
 
-    if cli.no_color {
+    if cli.no_color || std::env::var("NO_COLOR").is_ok() {
         colored::control::set_override(false);
     }
 
