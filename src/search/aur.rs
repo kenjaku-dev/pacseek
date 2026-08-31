@@ -138,6 +138,69 @@ pub async fn search_aur(
     Ok(results)
 }
 
+pub fn search_aur_blocking(
+    query: &str,
+    by: &str,
+    limit: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<Package>> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
+    let encoded = encoded.replace('+', "%20");
+    let url = format!("{}/search/{}?by={}", AUR_RPC, encoded, by);
+    tracing::debug!(url=%url, "aur blocking request");
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let resp = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .with_context(|| format!("AUR request failed {}", url))?;
+    if !resp.status().is_success() {
+        anyhow::bail!("AUR RPC returned HTTP {}", resp.status());
+    }
+    let text = resp.text()?;
+    let parsed: AurResponse = serde_json::from_str(&text)
+        .with_context(|| format!("AUR json parse failed: {}", &text[..text.len().min(500)]))?;
+    if parsed.type_ == "error" {
+        let msg = parsed
+            .error
+            .unwrap_or_else(|| "unknown AUR error".to_string());
+        anyhow::bail!("AUR error: {}", msg);
+    }
+    let mut results: Vec<Package> = parsed.results.into_iter().map(Package::from).collect();
+    if use_regex {
+        let re = regex::RegexBuilder::new(query)
+            .case_insensitive(true)
+            .build()?;
+        results.retain(|p| {
+            re.is_match(&p.name)
+                || p.description
+                    .as_deref()
+                    .map(|d| re.is_match(d))
+                    .unwrap_or(false)
+        });
+    }
+    results.sort_by(|a, b| {
+        b.popularity
+            .unwrap_or(0.0)
+            .partial_cmp(&a.popularity.unwrap_or(0.0))
+            .unwrap()
+            .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
+    });
+    if limit != 0 && results.len() > limit {
+        results.truncate(limit);
+    }
+    Ok(results)
+}
+
 // Alternative via raur crate (kept for reference, not used in hot path)
 // pub async fn search_aur_via_raur(query: &str) -> anyhow::Result<Vec<Package>> {
 //     use raur::Raur;

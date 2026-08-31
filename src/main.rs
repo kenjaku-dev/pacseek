@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use clap::Parser;
 use futures::future::join;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -12,7 +14,49 @@ use pacseek::search::{search_aur, search_repo, search_repo_fallback};
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Tracing init
+    // Determine TUI mode per tui-design lifecycle + cli-basics
+    // --tui forces TUI, --no-tui forces plain, --json forces plain, otherwise auto
+    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
+    let should_tui = if cli.no_tui || cli.json {
+        false
+    } else if cli.tui {
+        true
+    } else if cli.query.is_none() {
+        // No query and TTY -> TUI (your drawing: term window with search bar)
+        is_tty
+    } else {
+        false
+    };
+
+    if should_tui {
+        // Respect NO_COLOR for TUI
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            // ratatui will handle via style, but we set flag
+        }
+        if !is_tty {
+            eprintln!("Error: --tui requires a terminal (TTY).");
+            eprintln!("Try: pacseek <query> --no-tui   or   pacseek --help");
+            eprintln!("Tip: In headless/CI, use --json or --no-tui");
+            std::process::exit(1);
+        }
+        let initial = cli.query.clone().unwrap_or_default();
+        // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
+        // Need to drop tracing subscriber that may write to stdout? Keep it quiet for TUI
+        return pacseek::tui::run(initial).map_err(|e| anyhow::anyhow!("{e}"));
+    }
+
+    // --- CLI one-shot mode (existing) ---
+    // Need query now
+    let query = match cli.query {
+        Some(q) if !q.trim().is_empty() => q,
+        _ => {
+            eprintln!("Usage: pacseek <query>  or  pacseek --tui");
+            eprintln!("Try 'pacseek --help' for more information.");
+            std::process::exit(2);
+        }
+    };
+
+    // Tracing init (only for CLI, not TUI which logs to file per skill)
     let filter = match cli.verbose {
         0 => EnvFilter::new("warn"),
         1 => EnvFilter::new("info"),
@@ -34,11 +78,14 @@ async fn main() -> anyhow::Result<()> {
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
 
-    // Spawn repo search on blocking thread (alpm is sync & not Send easily due to *mut)
-    let query_repo = cli.query.clone();
+    let query_repo = query.clone();
+    let query_aur = query.clone();
     let limit_repo = cli.limit;
+    let limit_aur = cli.limit;
     let regex_repo = cli.regex;
+    let regex_aur = cli.regex;
     let installed_only = cli.installed_only;
+    let by_str = cli.by.as_str().to_string();
 
     let repo_future = async {
         if matches!(cli.source, Source::Aur) {
@@ -64,7 +111,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Handle installed_only: AUR has no reliable installed state without tracking, so warn and skip AUR
     let aur_enabled = !matches!(cli.source, Source::Repo) && !cli.installed_only;
     if cli.installed_only
         && matches!(cli.source, Source::Aur | Source::All)
@@ -73,11 +119,6 @@ async fn main() -> anyhow::Result<()> {
     {
         eprintln!("Note: --installed-only only applies to repo packages, AUR results hidden");
     }
-
-    let query_aur = cli.query.clone();
-    let by_str = cli.by.as_str().to_string();
-    let limit_aur = cli.limit;
-    let regex_aur = cli.regex;
 
     let aur_future = async {
         if !aur_enabled {
@@ -98,7 +139,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Spinner for butter UX (only if not json and not verbose)
     let spinner = if !cli.json && cli.verbose == 0 {
         let pb = ProgressBar::new_spinner();
         pb.set_style(
@@ -107,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
                 .template("{spinner:.cyan} {msg}")
                 .unwrap(),
         );
-        pb.set_message(format!("Searching for '{}'...", cli.query));
+        pb.set_message(format!("Searching for '{}'...", query));
         pb.enable_steady_tick(std::time::Duration::from_millis(80));
         Some(pb)
     } else {
@@ -118,12 +158,6 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(pb) = spinner {
         pb.finish_and_clear();
-    }
-
-    // If both failed and we have zero results, exit 1
-    if repo_packages.is_empty() && aur_packages.is_empty() {
-        // Still print "No packages found" via output, but exit 1 if not json? Keep 0 for scriptability
-        // We'll exit 0 but show message
     }
 
     print_packages(

@@ -5,12 +5,20 @@ use clap::{Parser, ValueEnum};
     name = "pacseek",
     version,
     about = "Fast search for Arch/Artix official repos + AUR",
-    long_about = "Search both official pacman repositories (via libalpm) and the AUR (via RPC v5) in one command.\nExample: pacseek firefox --limit 20 --json",
-    arg_required_else_help = true
+    long_about = "Search both official pacman repositories (via libalpm) and the AUR (via RPC v5) in one command.\nExample: pacseek firefox --limit 20 --json\nTUI: pacseek --tui or pacseek (no args) launches interactive terminal (ratatui)",
+    arg_required_else_help = false
 )]
 pub struct Cli {
-    /// Search query (substring, case-insensitive). Use --regex for regex mode.
-    pub query: String,
+    /// Search query (substring, case-insensitive). Use --regex for regex mode. If empty and --tui, opens TUI.
+    pub query: Option<String>,
+
+    /// Launch interactive TUI (search bar + results + install/info) — per tui-design full-screen session
+    #[arg(long)]
+    pub tui: bool,
+
+    /// Disable TUI even when no query (plain help); also respects NO_COLOR and non-TTY
+    #[arg(long)]
+    pub no_tui: bool,
 
     /// Where to search
     #[arg(short, long, value_enum, default_value_t = Source::All, help = "Source to search")]

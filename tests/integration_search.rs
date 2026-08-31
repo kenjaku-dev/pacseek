@@ -4,13 +4,19 @@ use predicates::prelude::*;
 #[test]
 fn help_works() {
     let mut cmd = Command::cargo_bin("pacseek").unwrap();
-    cmd.arg("--help").assert().success().stdout(predicate::str::contains("pacseek"));
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pacseek"));
 }
 
 #[test]
 fn version_works() {
     let mut cmd = Command::cargo_bin("pacseek").unwrap();
-    cmd.arg("--version").assert().success().stdout(predicate::str::contains("pacseek"));
+    cmd.arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pacseek"));
 }
 
 #[test]
