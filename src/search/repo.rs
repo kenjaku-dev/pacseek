@@ -1,0 +1,215 @@
+use alpm::{Alpm, SigLevel};
+use pacmanconf::Config;
+
+use crate::model::Package;
+
+pub fn search_repo(
+    query: &str,
+    limit: usize,
+    use_regex: bool,
+    installed_only: bool,
+) -> anyhow::Result<Vec<Package>> {
+    // Load pacman config (uses pacman-conf binary under the hood)
+    let config = Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}"))?;
+    let db_path = if config.db_path.is_empty() {
+        "/var/lib/pacman".to_string()
+    } else {
+        config.db_path.clone()
+    };
+    let root_dir = if config.root_dir.is_empty() {
+        "/".to_string()
+    } else {
+        config.root_dir.clone()
+    };
+
+    tracing::debug!(db_path=%db_path, root_dir=%root_dir, repos=?config.repos.iter().map(|r| &r.name).collect::<Vec<_>>(), "init alpm");
+
+    let handle = Alpm::new(root_dir.as_str(), db_path.as_str())
+        .map_err(|e| anyhow::anyhow!("alpm init failed: {e:?} (db_path={db_path})"))?;
+
+    // Register sync dbs from pacman.conf
+    for repo in &config.repos {
+        // Ignore errors for missing DBs but log
+        if let Err(e) = handle.register_syncdb(repo.name.as_str(), SigLevel::USE_DEFAULT) {
+            tracing::warn!(repo=%repo.name, err=?e, "failed to register syncdb, skipping");
+        }
+    }
+
+    let syncdbs = handle.syncdbs();
+    if syncdbs.is_empty() {
+        tracing::warn!("no syncdbs registered — is pacman DB synced? Run `sudo pacman -Sy`");
+    }
+
+    // Also get local db for installed check
+    let localdb = handle.localdb();
+
+    let mut results: Vec<Package> = Vec::new();
+
+    // If regex mode, use alpm's regex search directly
+    // Otherwise use substring case-insensitive filter (manual) for more predictable matching
+    let query_lower = query.to_lowercase();
+    let re = if use_regex {
+        Some(
+            regex::RegexBuilder::new(query)
+                .case_insensitive(true)
+                .build()?,
+        )
+    } else {
+        None
+    };
+
+    for db in syncdbs.iter() {
+        let db_name = db.name().to_string();
+
+        if use_regex {
+            // alpm supports regex search per field; we use search with regex pattern
+            let list = match db.search([query].iter()) {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!(db=%db_name, err=?e, "search failed");
+                    continue;
+                }
+            };
+            for pkg in list.iter() {
+                let is_installed = localdb.pkg(pkg.name()).is_ok();
+                if installed_only && !is_installed {
+                    continue;
+                }
+                if let Some(ref rx) = re {
+                    let desc = pkg.desc().unwrap_or("");
+                    if !rx.is_match(pkg.name()) && !rx.is_match(desc) {
+                        continue;
+                    }
+                }
+                let version = pkg.version().to_string();
+                let desc_owned = pkg.desc().map(|s| s.to_string());
+                let arch = pkg.arch().map(|a| a.to_string());
+                let url = pkg.url().map(|u| u.to_string());
+                results.push(Package {
+                    name: pkg.name().to_string(),
+                    version,
+                    description: desc_owned,
+                    repo: db_name.clone(),
+                    arch,
+                    url,
+                    installed: is_installed,
+                    votes: None,
+                    popularity: None,
+                    out_of_date: None,
+                    maintainer: None,
+                    num_votes: None,
+                    last_modified: None,
+                });
+                if limit != 0 && results.len() >= limit {
+                    break;
+                }
+            }
+        } else {
+            for pkg in db.pkgs().iter() {
+                let name = pkg.name().to_lowercase();
+                let desc_lower = pkg.desc().map(|d| d.to_lowercase()).unwrap_or_default();
+                if !name.contains(&query_lower) && !desc_lower.contains(&query_lower) {
+                    continue;
+                }
+                let is_installed = localdb.pkg(pkg.name()).is_ok();
+                if installed_only && !is_installed {
+                    continue;
+                }
+                let version = pkg.version().to_string();
+                let desc_owned = pkg.desc().map(|s| s.to_string());
+                let arch = pkg.arch().map(|a| a.to_string());
+                let url = pkg.url().map(|u| u.to_string());
+                results.push(Package {
+                    name: pkg.name().to_string(),
+                    version,
+                    description: desc_owned,
+                    repo: db_name.clone(),
+                    arch,
+                    url,
+                    installed: is_installed,
+                    votes: None,
+                    popularity: None,
+                    out_of_date: None,
+                    maintainer: None,
+                    num_votes: None,
+                    last_modified: None,
+                });
+                if limit != 0 && results.len() >= limit {
+                    break;
+                }
+            }
+        }
+        if limit != 0 && results.len() >= limit {
+            break;
+        }
+    }
+
+    // Sort: repo order as in pacman.conf, then name
+    // Keep stable: already in db order; just sort alphabetically for consistency unless bottom_up
+    results.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+
+    if limit != 0 && results.len() > limit {
+        results.truncate(limit);
+    }
+
+    Ok(results)
+}
+
+// Fallback when alpm fails — parses `pacman -Ss` output ( Butter fallback )
+pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Package>> {
+    use std::process::Command;
+    let output = Command::new("pacman")
+        .args(["-Ss", query])
+        .output()
+        .map_err(|e| anyhow::anyhow!("failed to run pacman -Ss: {e}"))?;
+    if !output.status.success() {
+        // pacman returns non-zero when no results, treat as empty
+        return Ok(vec![]);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut results = Vec::new();
+    let mut lines = stdout.lines().peekable();
+    while let Some(line) = lines.next() {
+        // line format: "extra/firefox 123.0-1 [installed]"
+        if !line.contains('/') {
+            continue;
+        }
+        let mut parts = line.splitn(2, ' ');
+        let repo_name = parts.next().unwrap_or("");
+        let (repo, name) = repo_name.split_once('/').unwrap_or(("", repo_name));
+        let version = parts
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let installed = line.contains("[installed");
+        let desc = lines.peek().map(|l| l.trim().to_string());
+        // consume desc line if it doesn't look like a package header
+        if let Some(peek) = lines.peek() {
+            if !peek.contains('/') {
+                lines.next();
+            }
+        }
+        results.push(Package {
+            name: name.to_string(),
+            version,
+            description: desc,
+            repo: repo.to_string(),
+            arch: None,
+            url: None,
+            installed,
+            votes: None,
+            popularity: None,
+            out_of_date: None,
+            maintainer: None,
+            num_votes: None,
+            last_modified: None,
+        });
+        if limit != 0 && results.len() >= limit {
+            break;
+        }
+    }
+    Ok(results)
+}
