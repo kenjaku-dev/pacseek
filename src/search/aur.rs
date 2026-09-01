@@ -3,20 +3,35 @@ use std::sync::OnceLock;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::config::Config;
 use crate::model::Package;
 
-const AUR_RPC: &str = "https://aur.archlinux.org/rpc/v5";
+#[allow(dead_code)]
+const AUR_RPC_DEFAULT: &str = "https://aur.archlinux.org/rpc/v5";
+
+fn aur_rpc() -> String {
+    Config::load().aur_rpc_url()
+}
 
 static AUR_BLOCKING_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 
 fn blocking_client() -> &'static reqwest::blocking::Client {
     AUR_BLOCKING_CLIENT.get_or_init(|| {
+        let timeout = Config::load().search.timeout_secs.max(1);
         reqwest::blocking::Client::builder()
             .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(timeout))
             .build()
             .expect("failed to build blocking reqwest client")
     })
+}
+
+fn blocking_client_with_timeout(secs: u64) -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(secs.max(1)))
+        .build()
+        .expect("failed to build blocking client")
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -88,10 +103,11 @@ pub async fn search_aur(
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
-    // AUR RPC is case-insensitive, url-encode
+    // AUR RPC is case-insensitive, url-encode — config-aware (behavior.aur_rpc or default)
     let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
     let encoded = encoded.replace('+', "%20");
-    let url = format!("{}/search/{}?by={}", AUR_RPC, encoded, by);
+    let rpc = aur_rpc();
+    let url = format!("{}/search/{}?by={}", rpc, encoded, by);
 
     tracing::debug!(url=%url, "aur request");
 
@@ -164,17 +180,30 @@ pub fn search_aur_blocking(
     }
     let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
     let encoded = encoded.replace('+', "%20");
-    let url = format!("{}/search/{}?by={}", AUR_RPC, encoded, by);
+    let rpc = aur_rpc();
+    let url = format!("{}/search/{}?by={}", rpc, encoded, by);
     tracing::debug!(url=%url, "aur blocking request");
-    let client = blocking_client();
-    let resp = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
-        )
-        .send()
-        .with_context(|| format!("AUR request failed {}", url))?;
+    let cfg_timeout = Config::load().search.timeout_secs.max(1);
+    // Use cached client if default timeout, else per-call client to respect config timeout
+    let resp = if cfg_timeout == 15 {
+        blocking_client()
+            .get(&url)
+            .header(
+                "User-Agent",
+                format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+            )
+            .send()
+            .with_context(|| format!("AUR request failed {}", url))?
+    } else {
+        blocking_client_with_timeout(cfg_timeout)
+            .get(&url)
+            .header(
+                "User-Agent",
+                format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+            )
+            .send()
+            .with_context(|| format!("AUR request failed {}", url))?
+    };
     if !resp.status().is_success() {
         anyhow::bail!("AUR RPC returned HTTP {}", resp.status());
     }

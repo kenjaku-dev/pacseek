@@ -12,6 +12,7 @@ use ratatui::{DefaultTerminal, widgets::ListState};
 use tui_input::{Input, backend::crossterm::EventHandler};
 
 use crate::cli::{AurBy, Source};
+use crate::config::Config;
 use crate::model::Package;
 use crate::search::aur::search_aur_blocking;
 
@@ -50,6 +51,7 @@ pub struct App {
     pub should_quit: bool,
     pub needs_search: bool,
     pub last_input_change: Instant,
+    pub config: Config,
     // Phase B: non-blocking search channel + dedup id per ratatui async skill
     search_rx: Option<std::sync::mpsc::Receiver<(u64, Vec<Package>, String)>>,
     search_id: u64,
@@ -94,6 +96,7 @@ impl App {
             should_quit: false,
             needs_search: !initial_query.is_empty(),
             last_input_change: Instant::now(),
+            config: Config::default(),
             search_rx: None,
             search_id: 0,
             next_search_id: 0,
@@ -108,6 +111,19 @@ impl App {
         app.use_regex = cli.regex;
         app.installed_only = cli.installed_only;
         app.no_color = cli.no_color || std::env::var("NO_COLOR").is_ok();
+        app
+    }
+
+    pub fn new_with_config(initial_query: String, cli: &crate::cli::Cli, cfg: &Config) -> Self {
+        let mut app = Self::new(initial_query);
+        // CLI already merged with cfg in main.rs, but keep cfg for theme/layout
+        app.limit = cli.limit;
+        app.source = cli.source;
+        app.aur_by = cli.by;
+        app.use_regex = cli.regex;
+        app.installed_only = cli.installed_only;
+        app.no_color = cli.no_color || cfg.theme.no_color || std::env::var("NO_COLOR").is_ok();
+        app.config = cfg.clone();
         app
     }
 
@@ -140,7 +156,8 @@ impl App {
             terminal.draw(|f| ui::draw(f, self))?;
 
             // poll with timeout to allow debounce & spinner & signal check
-            if event::poll(Duration::from_millis(200))? {
+            let poll_ms = self.config.tui.poll_ms.max(50);
+            if event::poll(Duration::from_millis(poll_ms))? {
                 let ev = event::read()?;
                 if self.handle_popup_event(&ev, terminal)? {
                     continue;
@@ -151,10 +168,11 @@ impl App {
             // Also poll after handling event for immediate fetch after Enter
             self.poll_search_results();
 
-            // Debounced search: if input changed and 400ms passed without new key
+            // Debounced search: if input changed and debounce passed without new key
+            let debounce = Duration::from_millis(self.config.tui.debounce_ms.max(50));
             if self.focus == Focus::Search
                 && self.needs_search
-                && self.last_input_change.elapsed() > Duration::from_millis(400)
+                && self.last_input_change.elapsed() > debounce
             {
                 self.trigger_search();
                 self.needs_search = false;
@@ -553,6 +571,9 @@ mod tests {
             bottom_up: false,
             verbose: 0,
             no_color: true,
+            config: None,
+            init_config: false,
+            show_config: false,
         };
         let app = App::new_with_cli("test".into(), &cli);
         assert_eq!(app.limit, 10);

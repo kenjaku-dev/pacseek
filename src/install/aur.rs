@@ -2,6 +2,8 @@ use anyhow::Context;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::config::Config;
+
 /// Install AUR package: git clone + makepkg -si (aur-guides:aur-makepkg, aur-pkgbuild)
 /// Follows AUR best practices: never run makepkg as root, show PKGBUILD, use --syncdeps
 pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
@@ -32,11 +34,15 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         anyhow::bail!("invalid package name: {:?}", name);
     }
 
-    // Determine cache dir: $XDG_CACHE_HOME/pacseek or ~/.cache/pacseek or /tmp/pacseek
+    // Determine cache dir: config [behavior]cache_dir or $XDG_CACHE_HOME/pacseek or ~/.cache/pacseek or /tmp/pacseek
     // Use 0o700 to avoid world-writable race in /tmp fallback (aur-makepkg)
-    let cache_base = dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("pacseek");
+    let cache_base = if let Some(p) = Config::load().cache_dir_path() {
+        p
+    } else {
+        dirs::cache_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("pacseek")
+    };
     std::fs::create_dir_all(&cache_base).context("create cache dir")?;
     #[cfg(unix)]
     {
@@ -142,8 +148,9 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
 
     // Build & install via makepkg -si (aur-makepkg) — default asks, --noconfirm only if explicit
     // Consistency with repo.rs: repo uses `pacman -S --needed` without --noconfirm; AUR should also ask by default
-    // Enable non-interactive with PACSEEK_NOCONFIRM=1 or --noconfirm flag (future CLI)
-    let noconfirm = std::env::var("PACSEEK_NOCONFIRM").is_ok();
+    // Enable non-interactive with PACSEEK_NOCONFIRM=1 or config behavior.makepkg_noconfirm
+    let cfg = Config::load();
+    let noconfirm = std::env::var("PACSEEK_NOCONFIRM").is_ok() || cfg.behavior.makepkg_noconfirm;
     eprintln!(
         "\nBuilding and installing {} with makepkg -si{} ...",
         name,

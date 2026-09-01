@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
@@ -55,6 +57,18 @@ pub struct Cli {
     /// Disable colored output
     #[arg(long)]
     pub no_color: bool,
+
+    /// Path to config file (default: ~/.config/pacseek/config.toml or ./pacseek.toml)
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Generate example config at default location and exit
+    #[arg(long)]
+    pub init_config: bool,
+
+    /// Print config path and exit
+    #[arg(long)]
+    pub show_config: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]

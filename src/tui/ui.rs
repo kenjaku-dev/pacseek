@@ -1,11 +1,13 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+use crate::config::{border_type_from_str, parse_style};
 
 use super::app::{App, Focus, Popup};
 
@@ -13,10 +15,16 @@ use super::app::{App, Focus, Popup};
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
 
-    // Responsive floor: 60×13 minimum (3 search + 8 results +1 status +1 help) per tui-design responsive + layout Min(8)
-    if area.width < 60 || area.height < 13 {
-        let msg = Paragraph::new("Terminal too small — need ≥60×13")
-            .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+    // Responsive floor: configurable via [tui] floor_width/floor_height per tui-design responsive + layout Min
+    let fw = app.config.tui.floor_width.max(40);
+    let fh = app.config.tui.floor_height.max(10);
+    if area.width < fw || area.height < fh {
+        let msg = Paragraph::new(format!("Terminal too small — need ≥{}×{}", fw, fh))
+            .style(if app.no_color {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                parse_style(&app.config.theme.border_error)
+            })
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
             .block(Block::bordered().title(" pacseek "));
@@ -24,14 +32,16 @@ pub fn draw(f: &mut Frame, app: &App) {
         return;
     }
 
-    // Layout: vertical [search 3][results min(0)][status 1][help 1] — clutter audit: status/help borderless keeps chrome <20%
+    // Layout: vertical configurable via config (defaults 3 / Min(8) /1 /1) — clutter audit keeps chrome <20%
+    let ls = app.config.tui.layout_search.max(2);
+    let lm = app.config.tui.layout_results_min.max(4);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // search bar
-            Constraint::Min(8),    // results
-            Constraint::Length(1), // status
-            Constraint::Length(1), // help
+            Constraint::Length(ls), // search bar
+            Constraint::Min(lm),    // results
+            Constraint::Length(1),  // status
+            Constraint::Length(1),  // help
         ])
         .split(area);
 
@@ -58,9 +68,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     let style = if app.no_color {
         Style::default()
     } else if app.focus == Focus::Search {
-        Style::default().fg(Color::Cyan)
+        parse_style(&app.config.theme.border_focused)
     } else {
-        Style::default().fg(Color::DarkGray)
+        parse_style(&app.config.theme.border_unfocused)
     };
 
     let input_str = app.input.value();
@@ -90,13 +100,17 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     let cursor_pos = app.input.visual_cursor();
 
     let paragraph = Paragraph::new(display)
-        .style(Style::default().fg(Color::White))
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            parse_style(&app.config.theme.text)
+        })
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(style)
                 .title(title)
-                .border_type(ratatui::widgets::BorderType::Rounded),
+                .border_type(border_type_from_str(&app.config.tui.border)),
         );
 
     f.render_widget(paragraph, area);
@@ -134,13 +148,17 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             "No packages found. Try another query or check filters."
         };
         let p = Paragraph::new(text)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(if app.no_color {
+                Style::default()
+            } else {
+                parse_style(&app.config.theme.text_dim)
+            })
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_type(border_type_from_str(&app.config.tui.border))
                     .title(title),
             );
         f.render_widget(p, area);
@@ -155,30 +173,20 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let repo_style = if !use_color {
                 Style::default().add_modifier(Modifier::BOLD)
             } else if pkg.repo == "aur" {
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD)
+                parse_style(&app.config.theme.repo_aur)
             } else {
                 match pkg.repo.as_str() {
-                    "core" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    "extra" => Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                    "multilib" => Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD),
-                    _ => Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    "core" => parse_style(&app.config.theme.repo_core),
+                    "extra" => parse_style(&app.config.theme.repo_extra),
+                    "multilib" => parse_style(&app.config.theme.repo_multilib),
+                    _ => parse_style(&app.config.theme.repo_other),
                 }
             };
             let installed = if pkg.installed {
                 Span::styled(
                     " [installed]",
                     if use_color {
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD)
+                        parse_style(&app.config.theme.installed)
                     } else {
                         Style::default().add_modifier(Modifier::BOLD)
                     },
@@ -197,7 +205,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!(" (+{} {:.2}){}", votes, pop, ood),
                     if use_color {
-                        Style::default().fg(Color::Yellow)
+                        parse_style(&app.config.theme.votes)
                     } else {
                         Style::default()
                     },
@@ -211,7 +219,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!(" {}", pkg.version),
                     if use_color {
-                        Style::default().fg(Color::White)
+                        parse_style(&app.config.theme.version)
                     } else {
                         Style::default()
                     },
@@ -223,7 +231,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let second = Line::from(vec![Span::styled(
                 format!("  {}", pkg.description.as_deref().unwrap_or("-")),
                 if use_color {
-                    Style::default().fg(Color::DarkGray)
+                    parse_style(&app.config.theme.text_dim)
                 } else {
                     Style::default()
                 },
@@ -237,18 +245,27 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_type(border_type_from_str(&app.config.tui.border))
                 .title(title),
         )
         .highlight_style(if use_color {
-            Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD)
+            let bg = crate::config::parse_color(&app.config.theme.highlight_bg);
+            let fg_style = parse_style(&app.config.theme.highlight_fg);
+            let mut st = Style::default().bg(bg);
+            if let Some(c) = fg_style.fg {
+                st = st.fg(c);
+            }
+            st.add_modifier(fg_style.add_modifier)
         } else {
             Style::default().add_modifier(Modifier::REVERSED)
         })
-        .highlight_symbol("▸ ");
+        .highlight_symbol(
+            app.config
+                .tui
+                .highlight_symbol
+                .clone()
+                .unwrap_or_else(|| "▸ ".into()),
+        );
 
     // ListState is stateful per ecosystem-rust.md
     let mut state = app.list_state;
@@ -259,9 +276,9 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let style = if app.no_color {
         Style::default()
     } else if app.is_loading {
-        Style::default().fg(Color::Cyan)
+        parse_style(&app.config.theme.status_loading)
     } else {
-        Style::default().fg(Color::Gray)
+        parse_style(&app.config.theme.status_idle)
     };
     let line = Line::from(vec![Span::styled(app.status.clone(), style)]);
     let p = Paragraph::new(line);
@@ -269,7 +286,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    // Discoverability per tui-design: contextual hints, not hidden — fixed C1 lie: Search no longer shows q:quit
     let help = if app.focus == Focus::Search {
         " Enter:search  Esc:list  Ctrl+C:quit  (type to filter)"
     } else {
@@ -279,29 +295,30 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         .style(if app.no_color {
             Style::default()
         } else {
-            Style::default().fg(Color::DarkGray)
+            parse_style(&app.config.theme.help)
         })
         .block(Block::default());
     f.render_widget(p, area);
 }
 
 fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: &App) {
-    let popup_area = centered_rect(70, 60, area);
+    let sz = app.config.tui.popup_info.unwrap_or([70, 60]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .title(format!(" {} / {} ", pkg.repo, pkg.name))
         .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_type(border_type_from_str(&app.config.tui.border))
         .border_style(if app.no_color {
             Style::default()
         } else {
-            Style::default().fg(Color::Yellow)
+            parse_style(&app.config.theme.popup_title)
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            Style::default().bg(Color::Black)
+            parse_style(&app.config.theme.popup_bg)
         });
 
     let inner = block.inner(popup_area);
@@ -311,9 +328,11 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
         Line::from(vec![
             Span::styled(
                 "Version: ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
+                },
             ),
             Span::raw(pkg.version.clone()),
             Span::raw(format!("  Arch: {}", pkg.arch.as_deref().unwrap_or("-"))),
@@ -321,9 +340,11 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
         Line::from(vec![
             Span::styled(
                 "Repo: ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
+                },
             ),
             Span::raw(pkg.repo.clone()),
             Span::raw(if pkg.installed { "  [installed]" } else { "" }),
@@ -331,18 +352,22 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
         Line::from(vec![
             Span::styled(
                 "URL: ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
+                },
             ),
             Span::raw(pkg.url.as_deref().unwrap_or("-")),
         ]),
         Line::from(vec![
             Span::styled(
                 "Desc: ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
+                },
             ),
             Span::raw(pkg.description.as_deref().unwrap_or("-")),
         ]),
@@ -350,9 +375,11 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
         Line::from(vec![
             Span::styled(
                 "Votes: ",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.votes).add_modifier(Modifier::BOLD)
+                },
             ),
             Span::raw(format!("{}", pkg.votes.unwrap_or(0))),
             Span::raw(format!(
@@ -372,37 +399,50 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
             } else {
                 ""
             },
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            if app.no_color {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                parse_style(&app.config.theme.out_of_date)
+            },
         )]),
         Line::raw(""),
         Line::from(Span::styled(
             "Press Esc/q/Enter to close",
-            Style::default().fg(Color::DarkGray),
+            if app.no_color {
+                Style::default()
+            } else {
+                parse_style(&app.config.theme.text_dim)
+            },
         )),
     ];
 
     let p = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .style(Style::default().fg(Color::White));
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            parse_style(&app.config.theme.text)
+        });
     f.render_widget(p, inner);
 }
 
 fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: &App) {
-    let popup_area = centered_rect(60, 30, area);
+    let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
     f.render_widget(Clear, popup_area);
     let block = Block::default()
         .title(" Confirm install ")
         .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_type(border_type_from_str(&app.config.tui.border))
         .border_style(if app.no_color {
             Style::default()
         } else {
-            Style::default().fg(Color::Yellow)
+            parse_style(&app.config.theme.popup_title)
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            Style::default().bg(Color::Black)
+            parse_style(&app.config.theme.popup_bg)
         });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -411,9 +451,11 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
             Span::raw("Install "),
             Span::styled(
                 format!("{}/{} {}", pkg.repo, pkg.name, pkg.version),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.installed)
+                },
             ),
             Span::raw(" ?"),
         ]),
@@ -421,14 +463,20 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
         Line::from(vec![
             Span::styled(
                 "Y",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.installed)
+                },
             ),
             Span::raw("/Enter = yes  "),
             Span::styled(
                 "N/Esc",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    parse_style(&app.config.theme.out_of_date)
+                },
             ),
             Span::raw(" = cancel"),
         ]),
@@ -439,7 +487,11 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
             } else {
                 "Will run: sudo pacman -S <pkg> [needs password]"
             },
-            Style::default().fg(Color::DarkGray),
+            if app.no_color {
+                Style::default()
+            } else {
+                parse_style(&app.config.theme.text_dim)
+            },
         )),
     ];
     let p = Paragraph::new(text)
@@ -449,30 +501,33 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
 }
 
 fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
-    let popup_area = centered_rect(60, 20, area);
+    let sz = app.config.tui.popup_message.unwrap_or([60, 20]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
     f.render_widget(Clear, popup_area);
     let block = Block::default()
         .title(" Message ")
         .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_type(border_type_from_str(&app.config.tui.border))
         .border_style(if app.no_color {
             Style::default()
+        } else if msg.starts_with('✓') {
+            parse_style(&app.config.theme.installed)
         } else {
-            Style::default().fg(if msg.starts_with('✓') {
-                Color::Green
-            } else {
-                Color::Red
-            })
+            parse_style(&app.config.theme.out_of_date)
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            Style::default().bg(Color::Black)
+            parse_style(&app.config.theme.popup_bg)
         });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     let p = Paragraph::new(msg.to_string())
-        .style(Style::default().fg(Color::White))
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            parse_style(&app.config.theme.text)
+        })
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(Wrap { trim: true });
     f.render_widget(p, inner);

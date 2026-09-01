@@ -40,6 +40,27 @@ pub fn run_with_cli(initial_query: String, cli: &crate::cli::Cli) -> Result<()> 
     result
 }
 
+pub fn run_with_config(
+    initial_query: String,
+    cli: &crate::cli::Cli,
+    cfg: &crate::config::Config,
+) -> Result<()> {
+    let _ = color_eyre::install();
+    let mut terminal = ratatui::try_init().map_err(|e| color_eyre::eyre::eyre!(e))?;
+    let result = App::new_with_config(initial_query, cli, cfg).run(&mut terminal);
+    if let Err(e) = ratatui::try_restore() {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+            crossterm::event::DisableMouseCapture
+        );
+        eprintln!("restore warning: {e}");
+    }
+    result
+}
+
 // For suspending TUI to run child process (pacman/makepkg) — per tui-design lifecycle
 // Phase D4: flush + drain EventStream per ratatui recipe, both-fail aggregation already handled
 pub fn suspend_and_run<F, T>(terminal: &mut DefaultTerminal, f: F) -> color_eyre::Result<T>

@@ -6,12 +6,71 @@ use tokio::task;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use pacseek::cli::{Cli, Source};
+use pacseek::config::Config;
 use pacseek::output::print_packages;
 use pacseek::search::{search_aur, search_repo, search_repo_fallback};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // --init-config / --show-config early exit (no TUI, no search)
+    if cli.init_config {
+        match Config::init_example() {
+            Ok(p) => {
+                println!("Created {}", p.display());
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("init-config: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+    if cli.show_config {
+        if let Some(p) = cli.config.clone().or_else(Config::default_path) {
+            println!("{}", p.display());
+        } else {
+            println!("(no config dir)");
+        }
+        if let Some(p) = Config::project_path() {
+            println!("project: {}", p.display());
+        }
+        return Ok(());
+    }
+
+    // Load config: --config PATH > project-local > XDG
+    let cfg = if let Some(ref p) = cli.config {
+        Config::load_from(p).unwrap_or_default()
+    } else {
+        Config::load()
+    };
+
+    // Merge config into cli where cli is still at default (so config becomes default)
+    // This keeps CLI as override — user intent preserved per precedence: defaults < config < CLI
+    if cli.limit == 50 && cfg.search.limit != 50 {
+        cli.limit = cfg.search.limit;
+    }
+    if cli.source == Source::All && cfg.effective_source() != Source::All {
+        cli.source = cfg.effective_source();
+    }
+    if cli.by == pacseek::cli::AurBy::NameDesc
+        && cfg.effective_aur_by() != pacseek::cli::AurBy::NameDesc
+    {
+        cli.by = cfg.effective_aur_by();
+    }
+    if !cli.regex && cfg.search.regex {
+        cli.regex = true;
+    }
+    if !cli.installed_only && cfg.search.installed_only {
+        cli.installed_only = true;
+    }
+    if !cli.bottom_up && (cfg.search.bottom_up || cfg.behavior.bottom_up) {
+        cli.bottom_up = true;
+    }
+    if !cli.no_color && cfg.theme.no_color {
+        cli.no_color = true;
+    }
 
     // Determine TUI mode per tui-design lifecycle + cli-basics
     // --tui forces TUI, --no-tui forces plain, --json forces plain, otherwise auto
@@ -36,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
         }
         let initial = cli.query.clone().unwrap_or_default();
         // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
-        return pacseek::tui::run_with_cli(initial, &cli).map_err(|e| anyhow::anyhow!("{e}"));
+        return pacseek::tui::run_with_config(initial, &cli, &cfg)
+            .map_err(|e| anyhow::anyhow!("{e}"));
     }
 
     // --- CLI one-shot mode (existing) ---
@@ -67,9 +127,10 @@ async fn main() -> anyhow::Result<()> {
         colored::control::set_override(false);
     }
 
+    let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
     let client = reqwest::Client::builder()
         .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(timeout)
         .build()?;
 
     let query_repo = query.clone();
@@ -141,10 +202,19 @@ async fn main() -> anyhow::Result<()> {
 
     let spinner = if !cli.json && cli.verbose == 0 {
         let pb = ProgressBar::new_spinner();
-        // unwrap safe: template is static, fallback to default if invalid (rust-common-pitfalls: avoid unwrap on main with panic=abort)
+        let tick = cfg
+            .tui
+            .tick_chars
+            .clone()
+            .unwrap_or_else(|| "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ".into());
+        let tmpl = cfg
+            .tui
+            .spinner_template
+            .clone()
+            .unwrap_or_else(|| "{spinner:.cyan} {msg}".into());
         let style = ProgressStyle::default_spinner()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
-            .template("{spinner:.cyan} {msg}")
+            .tick_chars(&tick)
+            .template(&tmpl)
             .unwrap_or_else(|_| ProgressStyle::default_spinner());
         pb.set_style(style);
         pb.set_message(format!("Searching for '{}'...", query));

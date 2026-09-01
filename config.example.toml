@@ -1,0 +1,53 @@
+# pacseek config — copy to ~/.config/pacseek/config.toml and edit
+# All fields optional; missing = defaults. Changes apply on next launch.
+
+[search]
+limit = 50
+source = "all"
+by = "name-desc"
+regex = false
+installed_only = false
+timeout_secs = 15
+bottom_up = false
+
+[tui]
+floor_width = 60
+floor_height = 13
+layout_search = 3
+layout_results_min = 8
+border = "rounded"
+highlight_symbol = "▸ "
+popup_info = [70, 60]
+popup_confirm = [60, 30]
+popup_message = [60, 20]
+debounce_ms = 400
+poll_ms = 200
+
+[theme]
+no_color = false
+border_focused = "cyan"
+border_unfocused = "dark_gray"
+border_error = "red bold"
+text = "white"
+text_dim = "dark_gray"
+repo_core = "red bold"
+repo_extra = "green bold"
+repo_multilib = "blue bold"
+repo_aur = "magenta bold"
+repo_other = "cyan bold"
+installed = "green bold"
+out_of_date = "red bold"
+votes = "yellow"
+version = "white"
+highlight_bg = "dark_gray"
+highlight_fg = "white bold"
+status_loading = "cyan"
+status_idle = "gray"
+help = "dark_gray"
+popup_title = "yellow"
+popup_bg = "black"
+
+[behavior]
+bottom_up = false
+verbose = 0
+makepkg_noconfirm = false
