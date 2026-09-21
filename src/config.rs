@@ -224,6 +224,8 @@ pub struct BehaviorConfig {
     pub remove_flags: String,
     #[serde(default)]
     pub remove_noconfirm: bool,
+    #[serde(default)]
+    pub refresh_noconfirm: bool,
 }
 
 // ---- path & load -----------------------------------------------------------
@@ -357,6 +359,7 @@ verbose = 0
 makepkg_noconfirm = false
 remove_flags = "Rs"        # R|Rs|Rns|Ru — sudo pacman -<flags>
 remove_noconfirm = false   # add --noconfirm to remove
+refresh_noconfirm = false  # add --noconfirm to refresh (pacman -Sy)
 "#
         .into()
     }
@@ -556,6 +559,9 @@ impl Config {
     }
     pub fn remove_noconfirm(&self) -> bool {
         self.behavior.remove_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
+    pub fn refresh_noconfirm(&self) -> bool {
+        self.behavior.refresh_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
     }
 }
 
