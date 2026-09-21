@@ -132,7 +132,7 @@ impl App {
             mode: Mode::Search,
             popup: Popup::None,
             is_loading: false,
-            status: "Type to search, Enter to search, Tab remover, ? help".into(),
+            status: "Type to search, Enter search, F5 refresh, Tab remover, ? help".into(),
             initial_query: initial_query.clone(),
             last_query: String::new(),
             last_query_search: String::new(),

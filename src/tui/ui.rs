@@ -351,16 +351,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
     let help = match (app.mode, app.focus) {
         (Mode::Search, Focus::Search) => {
-            " Enter:search  Esc:list  Tab:remover  ?:help  Ctrl+C:quit "
+            " Enter:search F5:refresh Esc:list Tab:remover ?:help Ctrl+C:quit "
         }
         (Mode::Search, Focus::List) => {
-            " ↑↓/j k:move  Enter:install  i:info  r:refresh  /:search  Tab:remover  ?:help  q:quit "
+            " ↑↓/j k:move Enter:install i:info r/F5:refresh /:search Tab:remover ?:help q:quit "
         }
         (Mode::Installed, Focus::Search) => {
-            " Enter:filter  Esc:list  Tab:search  ?:help  Ctrl+C:quit "
+            " Enter:filter F5:refresh Esc:list Tab:search ?:help Ctrl+C:quit "
         }
         (Mode::Installed, Focus::List) => {
-            " ↑↓/j k:move  Enter/d:remove  i:info  r:refresh  /:filter  Tab:search  ?:help  q:quit "
+            " ↑↓/j k:move Enter/d:remove i:info r/F5:refresh /:filter Tab:search ?:help q:quit "
         }
     };
     let p = Paragraph::new(help)
