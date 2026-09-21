@@ -24,7 +24,7 @@ Built with **best skills**: `ratatui 0.30` (tui-design ecosystem-rust, immediate
 - **One-shot CLI:** `pacseek <query>` repo first, aur after — parallel tokio, `libalpm` local DB, fallback `pacman -Ss`
 - **TUI:** `pacseek --tui` or `pacseek` (no args, TTY) → tabs `Search` / `Installed` (`Tab` to switch) → search bar + virtualized `List` → `i` info / `?` help popup → `Enter` confirm → `sudo pacman -S` (repo) or `git clone + makepkg -si` (AUR, PKGBUILD preview, `namcap` if present, `~/.cache/pacseek`)
  - **Remover:** `Tab` → Installed mode (empty filter lists all, type to filter) → `Enter`/`d`/`x` remove → confirm popup (`sudo pacman -Rs`, `pacman -Qi` preview) → `pacseek --remove <pkg>` for scripts
- - **Refresh:** `r`/`F5` in list → confirm popup → `sudo pacman -Sy` → cache cleared + re-query → `pacseek --refresh` for scripts
+ - **Refresh:** `F5`/`Ctrl+R` anywhere or `r` in list → confirm popup → `sudo pacman -Sy` → cache cleared + re-query → `pacseek --refresh` for scripts
  - Filters: `--source aur|repo|all`, `--by name|name-desc|maintainer...`, `--limit N`, `--regex`, `--installed-only`, `--bottom-up`, `--json`, `--no-color`, `--no-tui`, `--remove PKG`, `--refresh`
  - **Config:** `~/.config/pacseek/config.toml` (or `./pacseek.toml` project-local) — edit colors, borders, layout, timeouts without recompile — `pacseek --init-config` to generate, `--show-config` to locate, `--config PATH` to override
  - Safety: `aur-guides` — HTTPS sources, `makepkg` never as root via `nix::geteuid`, `PKGBUILD` shown, `tui-design` lifecycle `try_restore/try_init` + panic hook `color_eyre` before `ratatui::init`
