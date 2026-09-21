@@ -24,6 +24,18 @@ fn default_true() -> bool {
 fn default_border() -> String {
     "rounded".into()
 }
+fn default_remove_flags() -> String {
+    "Rs".into()
+}
+fn default_repo_local() -> String {
+    "green bold".into()
+}
+fn default_tab_selected() -> String {
+    "black on cyan bold".into()
+}
+fn default_tab_normal() -> String {
+    "dark_gray".into()
+}
 
 // ---- top-level -------------------------------------------------------------
 
@@ -94,6 +106,8 @@ pub struct TuiConfig {
     pub border: String,
     #[serde(default)]
     pub highlight_symbol: Option<String>,
+    #[serde(default = "default_true")]
+    pub show_tabs: bool,
     pub popup_info: Option<[u16; 2]>,
     pub popup_confirm: Option<[u16; 2]>,
     pub popup_message: Option<[u16; 2]>,
@@ -110,11 +124,12 @@ impl Default for TuiConfig {
         Self {
             enabled: true,
             floor_width: 60,
-            floor_height: 13,
+            floor_height: 14,
             layout_search: 3,
             layout_results_min: 8,
             border: "rounded".into(),
             highlight_symbol: None,
+            show_tabs: true,
             popup_info: Some([70, 60]),
             popup_confirm: Some([60, 30]),
             popup_message: Some([60, 20]),
@@ -141,6 +156,8 @@ pub struct ThemeConfig {
     pub repo_multilib: String,
     pub repo_aur: String,
     pub repo_other: String,
+    #[serde(default = "default_repo_local")]
+    pub repo_local: String,
     pub installed: String,
     pub out_of_date: String,
     pub votes: String,
@@ -152,6 +169,10 @@ pub struct ThemeConfig {
     pub help: String,
     pub popup_title: String,
     pub popup_bg: String,
+    #[serde(default = "default_tab_selected")]
+    pub tab_selected: String,
+    #[serde(default = "default_tab_normal")]
+    pub tab_normal: String,
 }
 
 impl Default for ThemeConfig {
@@ -168,6 +189,7 @@ impl Default for ThemeConfig {
             repo_multilib: "blue bold".into(),
             repo_aur: "magenta bold".into(),
             repo_other: "cyan bold".into(),
+            repo_local: "green bold".into(),
             installed: "green bold".into(),
             out_of_date: "red bold".into(),
             votes: "yellow".into(),
@@ -179,6 +201,8 @@ impl Default for ThemeConfig {
             help: "dark_gray".into(),
             popup_title: "yellow".into(),
             popup_bg: "black".into(),
+            tab_selected: "black on cyan bold".into(),
+            tab_normal: "dark_gray".into(),
         }
     }
 }
@@ -196,6 +220,10 @@ pub struct BehaviorConfig {
     pub cache_dir: Option<String>,
     #[serde(default)]
     pub makepkg_noconfirm: bool,
+    #[serde(default = "default_remove_flags")]
+    pub remove_flags: String,
+    #[serde(default)]
+    pub remove_noconfirm: bool,
 }
 
 // ---- path & load -----------------------------------------------------------
@@ -280,10 +308,11 @@ bottom_up = false
 
 [tui]
 floor_width = 60
-floor_height = 13
+floor_height = 14          # 13 + 1 tabs bar (Search/Installed)
 layout_search = 3
 layout_results_min = 8
 border = "rounded"         # rounded|plain|double|thick
+show_tabs = true           # Tab bar on top: Search / Installed
 highlight_symbol = "▸ "   # set "" to disable
 popup_info = [70, 60]
 popup_confirm = [60, 30]
@@ -305,6 +334,7 @@ repo_extra = "green bold"
 repo_multilib = "blue bold"
 repo_aur = "magenta bold"
 repo_other = "cyan bold"
+repo_local = "green bold"
 installed = "green bold"
 out_of_date = "red bold"
 votes = "yellow"
@@ -316,6 +346,8 @@ status_idle = "gray"
 help = "dark_gray"
 popup_title = "yellow"
 popup_bg = "black"
+tab_selected = "black on cyan bold"
+tab_normal = "dark_gray"
 
 [behavior]
 bottom_up = false
@@ -323,6 +355,8 @@ verbose = 0
 # aur_rpc = "https://aur.archlinux.org/rpc/v5"
 # cache_dir = "/tmp/pacseek"
 makepkg_noconfirm = false
+remove_flags = "Rs"        # R|Rs|Rns|Ru — sudo pacman -<flags>
+remove_noconfirm = false   # add --noconfirm to remove
 "#
         .into()
     }
@@ -349,10 +383,18 @@ pub fn parse_color(s: &str) -> Color {
 
 pub fn parse_style(s: &str) -> Style {
     let mut style = Style::default();
-    for token in s.split([' ', ',', '+']) {
-        let t = token.trim().to_lowercase();
-        match t.as_str() {
-            "" | "none" => {}
+    // Support "fg on bg modifiers", e.g. "black on cyan bold", plus legacy "cyan bold".
+    // Tokens split on space/comma/plus; "on" consumes the next color token as background.
+    let tokens: Vec<String> = s
+        .split([' ', ',', '+'])
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let t = tokens[i].as_str();
+        match t {
+            "none" => {}
             "reset" => style = Style::default(),
             "bold" => style = style.add_modifier(Modifier::BOLD),
             "dim" => style = style.add_modifier(Modifier::DIM),
@@ -360,12 +402,34 @@ pub fn parse_style(s: &str) -> Style {
             "underlined" | "underline" => style = style.add_modifier(Modifier::UNDERLINED),
             "reversed" | "reverse" | "invert" => style = style.add_modifier(Modifier::REVERSED),
             "crossedout" | "crossed_out" => style = style.add_modifier(Modifier::CROSSED_OUT),
+            "on" => {
+                // Next token is background color
+                if let Some(bg) = tokens.get(i + 1) {
+                    style = style.bg(parse_color(bg));
+                    i += 1;
+                }
+            }
+            _ if t.starts_with("on:") || t.starts_with("bg:") => {
+                if let Some((_, c)) = t.split_once(':') {
+                    style = style.bg(parse_color(c));
+                }
+            }
+            _ if t.starts_with("on") && t.len() > 2 => {
+                // "oncyan", "on_cyan", "on-cyan"
+                let c = t
+                    .trim_start_matches("on")
+                    .trim_start_matches(['_', '-', ':']);
+                if !c.is_empty() {
+                    style = style.bg(parse_color(c));
+                }
+            }
             "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "bright_magenta"
             | "cyan" | "gray" | "grey" | "dark_gray" | "darkgray" | "white" => {
-                style = style.fg(parse_color(&t));
+                style = style.fg(parse_color(t));
             }
             _ => {}
         }
+        i += 1;
     }
     style
 }
@@ -376,6 +440,72 @@ pub fn border_type_from_str(s: &str) -> BorderType {
         "double" => BorderType::Double,
         "thick" => BorderType::Thick,
         _ => BorderType::Rounded,
+    }
+}
+
+/// Pre-parsed theme styles — built once per App to avoid per-frame `parse_style()` cost.
+/// Per ratatui perf: parsing strings per row per frame is wasteful for 50+ rows at 5fps poll.
+#[derive(Debug, Clone)]
+pub struct ThemeStyles {
+    pub border_focused: Style,
+    pub border_unfocused: Style,
+    pub border_error: Style,
+    pub text: Style,
+    pub text_dim: Style,
+    pub repo_core: Style,
+    pub repo_extra: Style,
+    pub repo_multilib: Style,
+    pub repo_aur: Style,
+    pub repo_other: Style,
+    pub repo_local: Style,
+    pub installed: Style,
+    pub out_of_date: Style,
+    pub votes: Style,
+    pub version: Style,
+    pub highlight: Style,
+    pub status_loading: Style,
+    pub status_idle: Style,
+    pub help: Style,
+    pub popup_title: Style,
+    pub popup_bg: Style,
+    pub tab_selected: Style,
+    pub tab_normal: Style,
+}
+
+impl From<&ThemeConfig> for ThemeStyles {
+    fn from(t: &ThemeConfig) -> Self {
+        let highlight_bg = parse_color(&t.highlight_bg);
+        let fg_style = parse_style(&t.highlight_fg);
+        let mut highlight = Style::default().bg(highlight_bg);
+        if let Some(c) = fg_style.fg {
+            highlight = highlight.fg(c);
+        }
+        highlight = highlight.add_modifier(fg_style.add_modifier);
+        Self {
+            border_focused: parse_style(&t.border_focused),
+            border_unfocused: parse_style(&t.border_unfocused),
+            border_error: parse_style(&t.border_error),
+            text: parse_style(&t.text),
+            text_dim: parse_style(&t.text_dim),
+            repo_core: parse_style(&t.repo_core),
+            repo_extra: parse_style(&t.repo_extra),
+            repo_multilib: parse_style(&t.repo_multilib),
+            repo_aur: parse_style(&t.repo_aur),
+            repo_other: parse_style(&t.repo_other),
+            repo_local: parse_style(&t.repo_local),
+            installed: parse_style(&t.installed),
+            out_of_date: parse_style(&t.out_of_date),
+            votes: parse_style(&t.votes),
+            version: parse_style(&t.version),
+            highlight,
+            status_loading: parse_style(&t.status_loading),
+            status_idle: parse_style(&t.status_idle),
+            help: parse_style(&t.help),
+            popup_title: parse_style(&t.popup_title),
+            popup_bg: parse_style(&t.popup_bg),
+            tab_selected: parse_style(&t.tab_selected),
+            tab_normal: parse_style(&t.tab_normal),
+        }
     }
 }
 
@@ -415,6 +545,18 @@ impl Config {
     pub fn cache_dir_path(&self) -> Option<PathBuf> {
         self.behavior.cache_dir.as_ref().map(PathBuf::from)
     }
+    /// Validated pacman remove flag, e.g. "Rs" -> "-Rs". Allowlist prevents injection
+    /// via config file. Allowed: R, Rs, Rns, Ru, Rsu, Rn, Rc, Rdd (expert).
+    pub fn remove_flag_arg(&self) -> String {
+        let f = self.behavior.remove_flags.trim().trim_start_matches('-');
+        match f {
+            "R" | "Rs" | "Rns" | "Ru" | "Rsu" | "Rn" | "Rc" | "Rdd" => format!("-{f}"),
+            _ => "-Rs".into(),
+        }
+    }
+    pub fn remove_noconfirm(&self) -> bool {
+        self.behavior.remove_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
 }
 
 #[cfg(test)]
@@ -453,5 +595,31 @@ mod tests {
         let cfg = Config::load_from(&p).unwrap();
         assert_eq!(cfg.search.source, "all");
         assert_eq!(cfg.search.by, "name-desc");
+    }
+
+    #[test]
+    fn parse_style_with_bg() {
+        let st = parse_style("black on cyan bold");
+        assert_eq!(st.fg, Some(Color::Black));
+        assert_eq!(st.bg, Some(Color::Cyan));
+        assert!(st.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn remove_flag_allowlist() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.remove_flag_arg(), "-Rs");
+        cfg.behavior.remove_flags = "Rns".into();
+        assert_eq!(cfg.remove_flag_arg(), "-Rns");
+        cfg.behavior.remove_flags = "--noconfirm; rm -rf".into();
+        assert_eq!(cfg.remove_flag_arg(), "-Rs");
+    }
+
+    #[test]
+    fn theme_styles_cache_builds() {
+        let cfg = Config::default();
+        let styles = ThemeStyles::from(&cfg.theme);
+        assert_eq!(styles.text.fg, Some(Color::White));
+        assert_eq!(styles.tab_selected.bg, Some(Color::Cyan));
     }
 }

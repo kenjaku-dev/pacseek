@@ -62,6 +62,10 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Remove an installed package (sudo pacman -R) and exit — non-TUI shortcut for remover mode
+    #[arg(long, value_name = "PKG")]
+    pub remove: Option<String>,
+
     /// Generate example config at default location and exit
     #[arg(long)]
     pub init_config: bool,

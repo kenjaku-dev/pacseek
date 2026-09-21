@@ -12,10 +12,11 @@ bottom_up = false
 
 [tui]
 floor_width = 60
-floor_height = 13
+floor_height = 14
 layout_search = 3
 layout_results_min = 8
 border = "rounded"
+show_tabs = true
 highlight_symbol = "▸ "
 popup_info = [70, 60]
 popup_confirm = [60, 30]
@@ -35,6 +36,7 @@ repo_extra = "green bold"
 repo_multilib = "blue bold"
 repo_aur = "magenta bold"
 repo_other = "cyan bold"
+repo_local = "green bold"
 installed = "green bold"
 out_of_date = "red bold"
 votes = "yellow"
@@ -46,8 +48,12 @@ status_idle = "gray"
 help = "dark_gray"
 popup_title = "yellow"
 popup_bg = "black"
+tab_selected = "black on cyan bold"
+tab_normal = "dark_gray"
 
 [behavior]
 bottom_up = false
 verbose = 0
 makepkg_noconfirm = false
+remove_flags = "Rs"
+remove_noconfirm = false

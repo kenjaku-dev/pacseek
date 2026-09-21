@@ -2,7 +2,7 @@ use pacseek::model::Package;
 
 #[test]
 fn sort_with_nan_does_not_panic() {
-    let mut pkgs = vec![
+    let mut pkgs = [
         Package {
             name: "a".into(),
             version: "1".into(),

@@ -18,6 +18,21 @@ pub fn get_cached_config() -> anyhow::Result<Config> {
     Ok(cfg)
 }
 
+/// Case-insensitive substring check without allocating in the common case.
+/// Package names/descs are overwhelmingly ASCII, so a direct `contains`
+/// against the already-lowercased needle usually hits; only fall back to a
+/// lowercased clone on miss (e.g. non-ASCII or uppercase haystack).
+fn contains_ci(haystack: &str, needle_lower: &str) -> bool {
+    if haystack.contains(needle_lower) {
+        return true;
+    }
+    // Avoid the allocation when there is no case overlap at all.
+    if !haystack.bytes().any(|b| b.is_ascii_uppercase()) && haystack.is_ascii() {
+        return false;
+    }
+    haystack.to_lowercase().contains(needle_lower)
+}
+
 pub fn search_repo_with_config(
     config: &Config,
     query: &str,
@@ -111,10 +126,16 @@ pub fn search_repo_with_config(
             }
         } else {
             for pkg in db.pkgs().iter() {
-                let name = pkg.name().to_lowercase();
-                let desc_lower = pkg.desc().map(|d| d.to_lowercase()).unwrap_or_default();
-                if !name.contains(&query_lower) && !desc_lower.contains(&query_lower) {
-                    continue;
+                // Fast path: name check first (zero-alloc hit in the common
+                // case); desc is only touched when the name misses.
+                if !contains_ci(pkg.name(), &query_lower) {
+                    let desc_hit = pkg
+                        .desc()
+                        .map(|d| contains_ci(d, &query_lower))
+                        .unwrap_or(false);
+                    if !desc_hit {
+                        continue;
+                    }
                 }
                 let is_installed = localdb.pkg(pkg.name()).is_ok();
                 if installed_only && !is_installed {
@@ -166,6 +187,139 @@ pub fn search_repo(
     let config = get_cached_config()
         .or_else(|_| Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}")))?;
     search_repo_with_config(&config, query, limit, use_regex, installed_only)
+}
+
+/// List/filter explicitly installed packages (localdb) for Remover mode.
+/// Empty query returns all installed up to `limit` (0 = no limit), sorted by name.
+/// Fast path: single ALPM handle, no syncdb registration, no per-pkg lowercase clones
+/// when name already matches.
+pub fn search_local(query: &str, limit: usize, use_regex: bool) -> anyhow::Result<Vec<Package>> {
+    let config = get_cached_config()
+        .or_else(|_| Config::new().map_err(|e| anyhow::anyhow!("pacmanconf failed: {e:?}")))?;
+    search_local_with_config(&config, query, limit, use_regex)
+}
+
+pub fn search_local_with_config(
+    config: &Config,
+    query: &str,
+    limit: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<Package>> {
+    let db_path = if config.db_path.is_empty() {
+        "/var/lib/pacman".to_string()
+    } else {
+        config.db_path.clone()
+    };
+    let root_dir = if config.root_dir.is_empty() {
+        "/".to_string()
+    } else {
+        config.root_dir.clone()
+    };
+    let handle = Alpm::new(root_dir.as_str(), db_path.as_str())
+        .map_err(|e| anyhow::anyhow!("alpm init failed: {e:?}"))?;
+    let localdb = handle.localdb();
+
+    let q = query.trim();
+    let q_lower = q.to_lowercase();
+    let re = if use_regex && !q.is_empty() {
+        Some(regex::RegexBuilder::new(q).case_insensitive(true).build()?)
+    } else {
+        None
+    };
+
+    let mut results: Vec<Package> = Vec::new();
+    for pkg in localdb.pkgs().iter() {
+        let name = pkg.name();
+        if !q.is_empty() {
+            if let Some(ref rx) = re {
+                let desc = pkg.desc().unwrap_or("");
+                if !rx.is_match(name) && !rx.is_match(desc) {
+                    continue;
+                }
+            } else {
+                // Fast path: name check first (zero-alloc hit in the common
+                // case); desc is only touched when the name misses.
+                if !contains_ci(name, &q_lower) {
+                    let desc_hit = pkg
+                        .desc()
+                        .map(|d| contains_ci(d, &q_lower))
+                        .unwrap_or(false);
+                    if !desc_hit {
+                        continue;
+                    }
+                }
+            }
+        }
+        results.push(Package {
+            name: name.to_string(),
+            version: pkg.version().to_string(),
+            description: pkg.desc().map(|s| s.to_string()),
+            repo: "local".to_string(),
+            arch: pkg.arch().map(|a| a.to_string()),
+            url: pkg.url().map(|u| u.to_string()),
+            installed: true,
+            votes: None,
+            popularity: None,
+            out_of_date: None,
+            maintainer: None,
+            num_votes: None,
+            last_modified: None,
+        });
+        if limit != 0 && results.len() >= limit {
+            break;
+        }
+    }
+    results.sort_by(|a, b| a.name.cmp(&b.name));
+    if limit != 0 && results.len() > limit {
+        results.truncate(limit);
+    }
+    Ok(results)
+}
+
+/// Fallback for Remover mode when ALPM fails — parses `pacman -Q` output.
+pub fn search_local_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Package>> {
+    use std::process::Command;
+    let output = Command::new("pacman")
+        .args(["-Q"])
+        .output()
+        .map_err(|e| anyhow::anyhow!("failed to run pacman -Q: {e}"))?;
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let q_lower = query.trim().to_lowercase();
+    let mut results = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(2, ' ');
+        let name = parts.next().unwrap_or("").trim();
+        let version = parts.next().unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        if !q_lower.is_empty() && !contains_ci(name, &q_lower) {
+            continue;
+        }
+        results.push(Package {
+            name: name.to_string(),
+            version,
+            description: None,
+            repo: "local".to_string(),
+            arch: None,
+            url: None,
+            installed: true,
+            votes: None,
+            popularity: None,
+            out_of_date: None,
+            maintainer: None,
+            num_votes: None,
+            last_modified: None,
+        });
+        if limit != 0 && results.len() >= limit {
+            break;
+        }
+    }
+    results.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(results)
 }
 
 // Fallback when alpm fails — parses `pacman -Ss` output ( Butter fallback )

@@ -1,4 +1,5 @@
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,14 @@ use crate::model::Package;
 #[allow(dead_code)]
 const AUR_RPC_DEFAULT: &str = "https://aur.archlinux.org/rpc/v5";
 
-fn aur_rpc() -> String {
-    Config::load().aur_rpc_url()
+fn aur_rpc_with_config(cfg: &Config) -> String {
+    cfg.aur_rpc_url()
 }
 
 static AUR_BLOCKING_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+/// Per-timeout client cache — building a blocking Client does TLS init, so
+/// reuse one per timeout value instead of constructing per search.
+static BLOCKING_CLIENTS: OnceLock<Mutex<HashMap<u64, reqwest::blocking::Client>>> = OnceLock::new();
 
 fn blocking_client() -> &'static reqwest::blocking::Client {
     AUR_BLOCKING_CLIENT.get_or_init(|| {
@@ -26,12 +30,45 @@ fn blocking_client() -> &'static reqwest::blocking::Client {
     })
 }
 
-fn blocking_client_with_timeout(secs: u64) -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
+fn blocking_client_for_timeout(secs: u64) -> reqwest::blocking::Client {
+    let secs = secs.max(1);
+    let cache = BLOCKING_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(c) = guard.get(&secs) {
+            return c.clone();
+        }
+    }
+    let client = reqwest::blocking::Client::builder()
         .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(secs.max(1)))
+        .timeout(std::time::Duration::from_secs(secs))
         .build()
-        .expect("failed to build blocking client")
+        .expect("failed to build blocking client");
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(secs, client.clone());
+    }
+    client
+}
+
+/// Sort by popularity/votes desc (paru-style, NaN-safe), keeping only the top
+/// `limit` via partial selection instead of a full sort when truncating.
+fn sort_and_truncate(results: &mut Vec<Package>, limit: usize) {
+    if results.len() <= 1 {
+        return;
+    }
+    let cmp = |a: &Package, b: &Package| {
+        let ap = a.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        let bp = b.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
+        bp.partial_cmp(&ap)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
+    };
+    if limit != 0 && results.len() > limit {
+        results.select_nth_unstable_by(limit, cmp);
+        results.truncate(limit);
+        results.sort_by(cmp);
+    } else {
+        results.sort_by(cmp);
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -100,13 +137,27 @@ pub async fn search_aur(
     limit: usize,
     use_regex: bool,
 ) -> anyhow::Result<Vec<Package>> {
+    let cfg = Config::load();
+    search_aur_with_config(client, query, by, limit, use_regex, &cfg).await
+}
+
+/// Config-aware async search — pass the cached `Config` to avoid file IO
+/// (`Config::load()`) on every search. Perf fix for CLI/TUI hot path.
+pub async fn search_aur_with_config(
+    client: &reqwest::Client,
+    query: &str,
+    by: &str,
+    limit: usize,
+    use_regex: bool,
+    cfg: &Config,
+) -> anyhow::Result<Vec<Package>> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
     // AUR RPC is case-insensitive, url-encode — config-aware (behavior.aur_rpc or default)
     let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
     let encoded = encoded.replace('+', "%20");
-    let rpc = aur_rpc();
+    let rpc = aur_rpc_with_config(cfg);
     let url = format!("{}/search/{}?by={}", rpc, encoded, by);
 
     tracing::debug!(url=%url, "aur request");
@@ -153,18 +204,9 @@ pub async fn search_aur(
     }
 
     // Sort by popularity/votes desc like paru does (more trusted first), but keep original if bottom_up false
-    // NaN-safe: filter non-finite to 0.0 and use unwrap_or Equal per rust-common-pitfalls
-    results.sort_by(|a, b| {
-        let ap = a.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
-        let bp = b.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
-        bp.partial_cmp(&ap)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
-    });
-
-    if limit != 0 && results.len() > limit {
-        results.truncate(limit);
-    }
+    // NaN-safe: filter non-finite to 0.0 and use unwrap_or Equal per rust-common-pitfalls.
+    // Partial selection when truncating (limit 50 of hundreds = O(n), not O(n log n)).
+    sort_and_truncate(&mut results, limit);
 
     Ok(results)
 }
@@ -175,35 +217,42 @@ pub fn search_aur_blocking(
     limit: usize,
     use_regex: bool,
 ) -> anyhow::Result<Vec<Package>> {
+    let cfg = Config::load();
+    search_aur_blocking_with_config(query, by, limit, use_regex, &cfg)
+}
+
+/// Config-aware blocking search — pass the App's cached `Config` to avoid
+/// file IO (`Config::load()`) on every keystroke. Perf fix for TUI debounce path.
+pub fn search_aur_blocking_with_config(
+    query: &str,
+    by: &str,
+    limit: usize,
+    use_regex: bool,
+    cfg: &Config,
+) -> anyhow::Result<Vec<Package>> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
     let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
     let encoded = encoded.replace('+', "%20");
-    let rpc = aur_rpc();
+    let rpc = aur_rpc_with_config(cfg);
     let url = format!("{}/search/{}?by={}", rpc, encoded, by);
     tracing::debug!(url=%url, "aur blocking request");
-    let cfg_timeout = Config::load().search.timeout_secs.max(1);
-    // Use cached client if default timeout, else per-call client to respect config timeout
-    let resp = if cfg_timeout == 15 {
-        blocking_client()
-            .get(&url)
-            .header(
-                "User-Agent",
-                format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
-            )
-            .send()
-            .with_context(|| format!("AUR request failed {}", url))?
+    let cfg_timeout = cfg.search.timeout_secs.max(1);
+    // Shared cached client per timeout (default 15 uses the process-wide OnceLock).
+    let client = if cfg_timeout == 15 {
+        blocking_client().clone()
     } else {
-        blocking_client_with_timeout(cfg_timeout)
-            .get(&url)
-            .header(
-                "User-Agent",
-                format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
-            )
-            .send()
-            .with_context(|| format!("AUR request failed {}", url))?
+        blocking_client_for_timeout(cfg_timeout)
     };
+    let resp = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .with_context(|| format!("AUR request failed {}", url))?;
     if !resp.status().is_success() {
         anyhow::bail!("AUR RPC returned HTTP {}", resp.status());
     }
@@ -229,23 +278,6 @@ pub fn search_aur_blocking(
                     .unwrap_or(false)
         });
     }
-    results.sort_by(|a, b| {
-        let ap = a.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
-        let bp = b.popularity.filter(|v| v.is_finite()).unwrap_or(0.0);
-        bp.partial_cmp(&ap)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.votes.unwrap_or(0).cmp(&a.votes.unwrap_or(0)))
-    });
-    if limit != 0 && results.len() > limit {
-        results.truncate(limit);
-    }
+    sort_and_truncate(&mut results, limit);
     Ok(results)
 }
-
-// Alternative via raur crate (kept for reference, not used in hot path)
-// pub async fn search_aur_via_raur(query: &str) -> anyhow::Result<Vec<Package>> {
-//     use raur::Raur;
-//     let raur = raur::Handle::new();
-//     let res = raur.search_by(query, raur::SearchBy::NameDesc).await?;
-//     Ok(res.into_iter().map(|p| Package { ... }).collect())
-// }

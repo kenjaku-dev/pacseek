@@ -3,15 +3,14 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::config::{border_type_from_str, parse_style};
-
-use super::app::{App, Focus, Popup};
+use super::app::{App, Focus, Mode, Popup};
 
 // tui-design skill: calm, predictable, fast — single border depth, semantic tokens, NO_COLOR aware
+// v0.3.0: Tabs bar (Search/Installed) + ThemeStyles cache (no per-frame parse_style).
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
 
@@ -23,7 +22,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             .style(if app.no_color {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
-                parse_style(&app.config.theme.border_error)
+                app.styles.border_error
             })
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
@@ -32,45 +31,95 @@ pub fn draw(f: &mut Frame, app: &App) {
         return;
     }
 
-    // Layout: vertical configurable via config (defaults 3 / Min(8) /1 /1) — clutter audit keeps chrome <20%
+    let show_tabs = app.config.tui.show_tabs;
+    // Layout: tabs(1) + search(3) + results(Min 8) + status(1) + help(1)
     let ls = app.config.tui.layout_search.max(2);
     let lm = app.config.tui.layout_results_min.max(4);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(ls), // search bar
-            Constraint::Min(lm),    // results
-            Constraint::Length(1),  // status
-            Constraint::Length(1),  // help
-        ])
-        .split(area);
-
-    draw_search(f, app, chunks[0]);
-    draw_results(f, app, chunks[1]);
-    draw_status(f, app, chunks[2]);
-    draw_help(f, app, chunks[3]);
+    if show_tabs {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),  // tabs
+                Constraint::Length(ls), // search bar
+                Constraint::Min(lm),    // results
+                Constraint::Length(1),  // status
+                Constraint::Length(1),  // help
+            ])
+            .split(area);
+        draw_tabs(f, app, chunks[0]);
+        draw_search(f, app, chunks[1]);
+        draw_results(f, app, chunks[2]);
+        draw_status(f, app, chunks[3]);
+        draw_help(f, app, chunks[4]);
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(ls), // search bar
+                Constraint::Min(lm),    // results
+                Constraint::Length(1),  // status
+                Constraint::Length(1),  // help
+            ])
+            .split(area);
+        draw_search(f, app, chunks[0]);
+        draw_results(f, app, chunks[1]);
+        draw_status(f, app, chunks[2]);
+        draw_help(f, app, chunks[3]);
+    }
 
     // Popups on top with Clear hole-punch
     match &app.popup {
         Popup::Info(pkg) => draw_info_popup(f, pkg, area, app),
         Popup::Confirm(pkg) => draw_confirm_popup(f, pkg, area, app),
+        Popup::ConfirmRemove(pkg) => draw_confirm_remove_popup(f, pkg, area, app),
+        Popup::Help => draw_help_popup(f, area, app),
         Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
     }
 }
 
-fn draw_search(f: &mut Frame, app: &App, area: Rect) {
-    let title = if app.focus == Focus::Search {
-        " Search (Enter to search, Esc to list) "
+fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
+    let use_color = !app.no_color;
+    let titles: Vec<Line> = if area.width < 50 {
+        // Narrow ASCII fallback — no emoji, short labels
+        vec![Line::from("[1]Search"), Line::from("[2]Installed")]
     } else {
-        " Search (press / to focus) "
+        vec![
+            Line::from("🔍 Search (install)"),
+            Line::from("🗑 Installed (remove)"),
+        ]
+    };
+    let tabs = Tabs::new(titles)
+        .select(app.mode.tab_index())
+        .style(if use_color {
+            app.styles.tab_normal
+        } else {
+            Style::default()
+        })
+        .highlight_style(if use_color {
+            app.styles.tab_selected
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        })
+        .divider(if area.width < 50 { "|" } else { " │ " });
+    // Hint on the right is rendered via status/help; keep tabs single-line, no border (clutter audit).
+    f.render_widget(tabs, area);
+    let _ = Mode::Search; // keep import used in narrow builds
+}
+
+fn draw_search(f: &mut Frame, app: &App, area: Rect) {
+    let title = match (app.mode, app.focus) {
+        (Mode::Search, Focus::Search) => " Search (Enter to search, Esc to list, Tab remover) ",
+        (Mode::Search, Focus::List) => " Search (press / to focus, Tab remover) ",
+        (Mode::Installed, Focus::Search) => " Filter installed (Enter to filter, Tab back) ",
+        (Mode::Installed, Focus::List) => " Filter installed (press / to focus, Tab back) ",
     };
     let style = if app.no_color {
         Style::default()
     } else if app.focus == Focus::Search {
-        parse_style(&app.config.theme.border_focused)
+        app.styles.border_focused
     } else {
-        parse_style(&app.config.theme.border_unfocused)
+        app.styles.border_unfocused
     };
 
     let input_str = app.input.value();
@@ -103,14 +152,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.text)
+            app.styles.text
         })
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(style)
                 .title(title)
-                .border_type(border_type_from_str(&app.config.tui.border)),
+                .border_type(app.border_type),
         );
 
     f.render_widget(paragraph, area);
@@ -125,8 +174,13 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_results(f: &mut Frame, app: &App, area: Rect) {
+    let mode_tag = match app.mode {
+        Mode::Search => "",
+        Mode::Installed => "installed ",
+    };
     let title = format!(
-        " Results {} {} ",
+        " Results {}{} {} ",
+        mode_tag,
         if app.is_loading { "⏳" } else { "" },
         if app.packages.is_empty() {
             "".into()
@@ -141,24 +195,35 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
 
     if app.packages.is_empty() {
         let text = if app.is_loading {
-            "Searching..."
-        } else if app.input.value().is_empty() {
-            "Type a package name above and press Enter — e.g. firefox"
+            match app.mode {
+                Mode::Search => "Searching...",
+                Mode::Installed => "Listing installed...",
+            }
+        } else if app.input.value().trim().is_empty() {
+            match app.mode {
+                Mode::Search => "Type a package name above and press Enter — e.g. firefox",
+                Mode::Installed => {
+                    "Installed mode — type to filter, empty shows all (Tab: back to search)"
+                }
+            }
         } else {
-            "No packages found. Try another query or check filters."
+            match app.mode {
+                Mode::Search => "No packages found. Try another query or check filters.",
+                Mode::Installed => "No installed packages match. Clear filter or press Tab.",
+            }
         };
         let p = Paragraph::new(text)
             .style(if app.no_color {
                 Style::default()
             } else {
-                parse_style(&app.config.theme.text_dim)
+                app.styles.text_dim
             })
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(border_type_from_str(&app.config.tui.border))
+                    .border_type(app.border_type)
                     .title(title),
             );
         f.render_widget(p, area);
@@ -173,20 +238,23 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let repo_style = if !use_color {
                 Style::default().add_modifier(Modifier::BOLD)
             } else if pkg.repo == "aur" {
-                parse_style(&app.config.theme.repo_aur)
+                app.styles.repo_aur
             } else {
                 match pkg.repo.as_str() {
-                    "core" => parse_style(&app.config.theme.repo_core),
-                    "extra" => parse_style(&app.config.theme.repo_extra),
-                    "multilib" => parse_style(&app.config.theme.repo_multilib),
-                    _ => parse_style(&app.config.theme.repo_other),
+                    "core" => app.styles.repo_core,
+                    "extra" => app.styles.repo_extra,
+                    "multilib" => app.styles.repo_multilib,
+                    "local" => app.styles.repo_local,
+                    _ => app.styles.repo_other,
                 }
             };
-            let installed = if pkg.installed {
+            // In Installed mode the [installed] tag is noise (all are installed) — hide it.
+            let show_installed_tag = pkg.installed && app.mode == Mode::Search;
+            let installed = if show_installed_tag {
                 Span::styled(
                     " [installed]",
                     if use_color {
-                        parse_style(&app.config.theme.installed)
+                        app.styles.installed
                     } else {
                         Style::default().add_modifier(Modifier::BOLD)
                     },
@@ -205,7 +273,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!(" (+{} {:.2}){}", votes, pop, ood),
                     if use_color {
-                        parse_style(&app.config.theme.votes)
+                        app.styles.votes
                     } else {
                         Style::default()
                     },
@@ -219,7 +287,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!(" {}", pkg.version),
                     if use_color {
-                        parse_style(&app.config.theme.version)
+                        app.styles.version
                     } else {
                         Style::default()
                     },
@@ -231,7 +299,7 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let second = Line::from(vec![Span::styled(
                 format!("  {}", pkg.description.as_deref().unwrap_or("-")),
                 if use_color {
-                    parse_style(&app.config.theme.text_dim)
+                    app.styles.text_dim
                 } else {
                     Style::default()
                 },
@@ -245,17 +313,11 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(border_type_from_str(&app.config.tui.border))
+                .border_type(app.border_type)
                 .title(title),
         )
         .highlight_style(if use_color {
-            let bg = crate::config::parse_color(&app.config.theme.highlight_bg);
-            let fg_style = parse_style(&app.config.theme.highlight_fg);
-            let mut st = Style::default().bg(bg);
-            if let Some(c) = fg_style.fg {
-                st = st.fg(c);
-            }
-            st.add_modifier(fg_style.add_modifier)
+            app.styles.highlight
         } else {
             Style::default().add_modifier(Modifier::REVERSED)
         })
@@ -276,9 +338,9 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let style = if app.no_color {
         Style::default()
     } else if app.is_loading {
-        parse_style(&app.config.theme.status_loading)
+        app.styles.status_loading
     } else {
-        parse_style(&app.config.theme.status_idle)
+        app.styles.status_idle
     };
     let line = Line::from(vec![Span::styled(app.status.clone(), style)]);
     let p = Paragraph::new(line);
@@ -286,16 +348,25 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let help = if app.focus == Focus::Search {
-        " Enter:search  Esc:list  Ctrl+C:quit  (type to filter)"
-    } else {
-        " ↑↓/j k:navigate  Enter:install  i:info  /:search  q:quit "
+    let help = match (app.mode, app.focus) {
+        (Mode::Search, Focus::Search) => {
+            " Enter:search  Esc:list  Tab:remover  ?:help  Ctrl+C:quit "
+        }
+        (Mode::Search, Focus::List) => {
+            " ↑↓/j k:move  Enter:install  i:info  /:search  Tab:remover  ?:help  q:quit "
+        }
+        (Mode::Installed, Focus::Search) => {
+            " Enter:filter  Esc:list  Tab:search  ?:help  Ctrl+C:quit "
+        }
+        (Mode::Installed, Focus::List) => {
+            " ↑↓/j k:move  Enter/d:remove  i:info  /:filter  Tab:search  ?:help  q:quit "
+        }
     };
     let p = Paragraph::new(help)
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.help)
+            app.styles.help
         })
         .block(Block::default());
     f.render_widget(p, area);
@@ -309,78 +380,50 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
     let block = Block::default()
         .title(format!(" {} / {} ", pkg.repo, pkg.name))
         .borders(Borders::ALL)
-        .border_type(border_type_from_str(&app.config.tui.border))
+        .border_type(app.border_type)
         .border_style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.popup_title)
+            app.styles.popup_title
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.popup_bg)
+            app.styles.popup_bg
         });
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
+    let bold = |s: Style| {
+        if app.no_color {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            s.add_modifier(Modifier::BOLD)
+        }
+    };
 
     let text = vec![
         Line::from(vec![
-            Span::styled(
-                "Version: ",
-                if app.no_color {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
-                },
-            ),
+            Span::styled("Version: ", bold(app.styles.status_loading)),
             Span::raw(pkg.version.clone()),
             Span::raw(format!("  Arch: {}", pkg.arch.as_deref().unwrap_or("-"))),
         ]),
         Line::from(vec![
-            Span::styled(
-                "Repo: ",
-                if app.no_color {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
-                },
-            ),
+            Span::styled("Repo: ", bold(app.styles.status_loading)),
             Span::raw(pkg.repo.clone()),
             Span::raw(if pkg.installed { "  [installed]" } else { "" }),
         ]),
         Line::from(vec![
-            Span::styled(
-                "URL: ",
-                if app.no_color {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
-                },
-            ),
+            Span::styled("URL: ", bold(app.styles.status_loading)),
             Span::raw(pkg.url.as_deref().unwrap_or("-")),
         ]),
         Line::from(vec![
-            Span::styled(
-                "Desc: ",
-                if app.no_color {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    parse_style(&app.config.theme.status_loading).add_modifier(Modifier::BOLD)
-                },
-            ),
+            Span::styled("Desc: ", bold(app.styles.status_loading)),
             Span::raw(pkg.description.as_deref().unwrap_or("-")),
         ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled(
-                "Votes: ",
-                if app.no_color {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    parse_style(&app.config.theme.votes).add_modifier(Modifier::BOLD)
-                },
-            ),
+            Span::styled("Votes: ", bold(app.styles.votes)),
             Span::raw(format!("{}", pkg.votes.unwrap_or(0))),
             Span::raw(format!(
                 "  Popularity: {:.2}",
@@ -402,7 +445,7 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
             if app.no_color {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
-                parse_style(&app.config.theme.out_of_date)
+                app.styles.out_of_date
             },
         )]),
         Line::raw(""),
@@ -411,7 +454,7 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
             if app.no_color {
                 Style::default()
             } else {
-                parse_style(&app.config.theme.text_dim)
+                app.styles.text_dim
             },
         )),
     ];
@@ -421,7 +464,7 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.text)
+            app.styles.text
         });
     f.render_widget(p, inner);
 }
@@ -433,16 +476,16 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
     let block = Block::default()
         .title(" Confirm install ")
         .borders(Borders::ALL)
-        .border_type(border_type_from_str(&app.config.tui.border))
+        .border_type(app.border_type)
         .border_style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.popup_title)
+            app.styles.popup_title
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.popup_bg)
+            app.styles.popup_bg
         });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -454,7 +497,7 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
                 if app.no_color {
                     Style::default().add_modifier(Modifier::BOLD)
                 } else {
-                    parse_style(&app.config.theme.installed)
+                    app.styles.installed
                 },
             ),
             Span::raw(" ?"),
@@ -466,7 +509,7 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
                 if app.no_color {
                     Style::default().add_modifier(Modifier::BOLD)
                 } else {
-                    parse_style(&app.config.theme.installed)
+                    app.styles.installed
                 },
             ),
             Span::raw("/Enter = yes  "),
@@ -475,7 +518,7 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
                 if app.no_color {
                     Style::default().add_modifier(Modifier::BOLD)
                 } else {
-                    parse_style(&app.config.theme.out_of_date)
+                    app.styles.out_of_date
                 },
             ),
             Span::raw(" = cancel"),
@@ -490,13 +533,145 @@ fn draw_confirm_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, ap
             if app.no_color {
                 Style::default()
             } else {
-                parse_style(&app.config.theme.text_dim)
+                app.styles.text_dim
             },
         )),
     ];
     let p = Paragraph::new(text)
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(Wrap { trim: true });
+    f.render_widget(p, inner);
+}
+
+fn draw_confirm_remove_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: &App) {
+    let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Confirm remove ")
+        .borders(Borders::ALL)
+        .border_type(app.border_type)
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.out_of_date
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_bg
+        });
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    let flag = app.config.remove_flag_arg();
+    let text = vec![
+        Line::from(vec![
+            Span::raw("Remove "),
+            Span::styled(
+                format!("{}/{} {}", pkg.repo, pkg.name, pkg.version),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.out_of_date
+                },
+            ),
+            Span::raw(" ?"),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "Y",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.installed
+                },
+            ),
+            Span::raw("/Enter = yes  "),
+            Span::styled(
+                "N/Esc",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.out_of_date
+                },
+            ),
+            Span::raw(" = cancel"),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            format!(
+                "Will run: sudo pacman {} {} [needs password]",
+                flag, pkg.name
+            ),
+            if app.no_color {
+                Style::default()
+            } else {
+                app.styles.text_dim
+            },
+        )),
+        Line::from(Span::styled(
+            "Check Required By in info (i) before removing libs.",
+            if app.no_color {
+                Style::default()
+            } else {
+                app.styles.text_dim
+            },
+        )),
+    ];
+    let p = Paragraph::new(text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(Wrap { trim: true });
+    f.render_widget(p, inner);
+}
+
+fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
+    let sz: [u16; 2] = [70, 60];
+    let popup_area = centered_rect(sz[0], sz[1], area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Help (?) ")
+        .borders(Borders::ALL)
+        .border_type(app.border_type)
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_title
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_bg
+        });
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    let lines = vec![
+        Line::from("Tab / Shift+Tab : switch Search <-> Installed"),
+        Line::from("1 / 2           : (same as Tab, when not typing)"),
+        Line::from(""),
+        Line::from("Search mode:"),
+        Line::from("  type + Enter  : search repo+AUR"),
+        Line::from("  ↑↓ / j k      : navigate"),
+        Line::from("  Enter         : install selected"),
+        Line::from("  i             : package info"),
+        Line::from(""),
+        Line::from("Installed mode:"),
+        Line::from("  type + Enter  : filter installed"),
+        Line::from("  ↑↓ / j k      : navigate"),
+        Line::from("  Enter / d / x : remove selected"),
+        Line::from("  i             : package info"),
+        Line::from(""),
+        Line::from("Global: / focus search, Esc focus toggle, ? help, q quit"),
+        Line::from(""),
+        Line::from("Press Esc/q/Enter/? to close"),
+    ];
+    let p = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.text
+        });
     f.render_widget(p, inner);
 }
 
@@ -507,18 +682,18 @@ fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
     let block = Block::default()
         .title(" Message ")
         .borders(Borders::ALL)
-        .border_type(border_type_from_str(&app.config.tui.border))
+        .border_type(app.border_type)
         .border_style(if app.no_color {
             Style::default()
         } else if msg.starts_with('✓') {
-            parse_style(&app.config.theme.installed)
+            app.styles.installed
         } else {
-            parse_style(&app.config.theme.out_of_date)
+            app.styles.out_of_date
         })
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.popup_bg)
+            app.styles.popup_bg
         });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -526,7 +701,7 @@ fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
         .style(if app.no_color {
             Style::default()
         } else {
-            parse_style(&app.config.theme.text)
+            app.styles.text
         })
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(Wrap { trim: true });

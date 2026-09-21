@@ -8,7 +8,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 use pacseek::cli::{Cli, Source};
 use pacseek::config::Config;
 use pacseek::output::print_packages;
-use pacseek::search::{search_aur, search_repo, search_repo_fallback};
+use pacseek::search::{search_aur_with_config, search_repo, search_repo_fallback};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -70,6 +70,23 @@ async fn main() -> anyhow::Result<()> {
     }
     if !cli.no_color && cfg.theme.no_color {
         cli.no_color = true;
+    }
+
+    // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI
+    if let Some(name) = cli.remove.clone() {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        match pacseek::install::remove::remove_package_with_config(&name, &cfg) {
+            Ok(()) => {
+                println!("Removed {}", name.trim());
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("remove failed: {}", e);
+                std::process::exit(1);
+            }
+        }
     }
 
     // Determine TUI mode per tui-design lifecycle + cli-basics
@@ -185,7 +202,9 @@ async fn main() -> anyhow::Result<()> {
         if !aur_enabled {
             Vec::new()
         } else {
-            match search_aur(&client, &query_aur, &by_str, limit_aur, regex_aur).await {
+            match search_aur_with_config(&client, &query_aur, &by_str, limit_aur, regex_aur, &cfg)
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::error!(err=?e, "AUR search failed");

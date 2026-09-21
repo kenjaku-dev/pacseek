@@ -84,6 +84,7 @@ fn print_package(pkg: &Package, kind: &str) {
             "core" => repo_part.red().bold(),
             "extra" => repo_part.green().bold(),
             "multilib" => repo_part.blue().bold(),
+            "local" => repo_part.green().bold(),
             "system" | "world" | "galaxy" | "lib32" => repo_part.cyan().bold(),
             _ => repo_part.yellow().bold(),
         }
