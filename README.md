@@ -59,8 +59,8 @@ pacseek firefox --bottom-up   # AUR first
 pacseek --tui               # empty search, type firefox → Enter
 pacseek --tui firefox       # prefilled query, immediate search
 pacseek                     # no args + TTY => TUI (like original pacseek)
-# Inside TUI: type query, Enter search, ↑↓/j k navigate, Enter install (confirm Y), i info, r refresh (confirm Y), / search, Tab remover, ? help, q quit
-# Tab → Installed mode: type to filter, Enter/d/x remove (confirm Y), r refresh (confirm Y), Tab back
+# Inside TUI: type query, Enter search, ↑↓/j k navigate, Enter install (confirm Y), i info, F5 or Ctrl+R refresh anywhere (r in list) (confirm Y), / search, Tab remover, ? help, q quit
+# Tab → Installed mode: type to filter, Enter/d/x remove (confirm Y), F5 refresh anywhere (r in list) (confirm Y), Tab back
 # Install needs sudo password; AUR shows PKGBUILD + namcap then makepkg -si; remove runs sudo pacman -Rs; refresh runs sudo pacman -Sy
 # CLI shortcuts: pacseek --remove <pkg> | pacseek --refresh
 ```
