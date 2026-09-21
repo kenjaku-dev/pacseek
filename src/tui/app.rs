@@ -462,7 +462,14 @@ impl App {
                 {
                     self.popup = Popup::ConfirmRefresh;
                 }
-                KeyCode::F(5) if self.focus == Focus::List && self.popup == Popup::None => {
+                // Global refresh: F5 anywhere + Ctrl+R while typing (plain r still types in Search).
+                KeyCode::F(5) if self.popup == Popup::None => {
+                    self.popup = Popup::ConfirmRefresh;
+                }
+                KeyCode::Char('r') | KeyCode::Char('R')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && self.popup == Popup::None =>
+                {
                     self.popup = Popup::ConfirmRefresh;
                 }
                 KeyCode::Char('q') if self.focus == Focus::List && self.popup == Popup::None => {
