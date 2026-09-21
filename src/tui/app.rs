@@ -1047,4 +1047,47 @@ mod tests {
         let _ = app.handle_event(&ev, &mut terminal);
         assert_eq!(app.popup, Popup::Help);
     }
+
+    #[test]
+    fn r_in_list_opens_confirm_refresh() {
+        let mut app = App::new("".into());
+        app.focus = Focus::List;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_eq!(app.popup, Popup::ConfirmRefresh);
+    }
+
+    #[test]
+    fn f5_in_list_opens_confirm_refresh() {
+        let mut app = App::new("".into());
+        app.focus = Focus::List;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::F(5),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_eq!(app.popup, Popup::ConfirmRefresh);
+    }
+
+    #[test]
+    fn r_in_search_types_instead_of_refresh() {
+        let mut app = App::new("".into());
+        app.focus = Focus::Search;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_ne!(app.popup, Popup::ConfirmRefresh);
+        assert_eq!(app.focus, Focus::Search);
+    }
 }

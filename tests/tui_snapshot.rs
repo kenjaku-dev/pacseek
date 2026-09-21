@@ -170,6 +170,17 @@ fn tui_help_popup_renders() {
     assert!(content.contains("Help"));
     assert!(content.contains("Tab"));
     assert!(content.contains("Installed"));
+    assert!(content.contains("refresh"));
+}
+
+#[test]
+fn tui_confirm_refresh_popup_renders() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.popup = Popup::ConfirmRefresh;
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Confirm refresh"));
+    assert!(content.contains("sudo pacman"));
 }
 
 #[test]

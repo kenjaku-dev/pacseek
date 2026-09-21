@@ -622,4 +622,22 @@ mod tests {
         assert_eq!(styles.text.fg, Some(Color::White));
         assert_eq!(styles.tab_selected.bg, Some(Color::Cyan));
     }
+
+    #[test]
+    fn refresh_noconfirm_when_enabled() {
+        let mut cfg = Config::default();
+        cfg.behavior.refresh_noconfirm = true;
+        assert!(cfg.refresh_noconfirm());
+    }
+
+    #[test]
+    fn refresh_command_args_respect_noconfirm() {
+        let cfg = Config::default();
+        let args = crate::install::refresh::refresh_command_args(&cfg);
+        assert_eq!(args, vec!["pacman", "-Sy"]);
+        let mut cfg_nc = Config::default();
+        cfg_nc.behavior.refresh_noconfirm = true;
+        let args_nc = crate::install::refresh::refresh_command_args(&cfg_nc);
+        assert_eq!(args_nc, vec!["pacman", "-Sy", "--noconfirm"]);
+    }
 }

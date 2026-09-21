@@ -11,6 +11,15 @@ fn help_works() {
 }
 
 #[test]
+fn help_shows_refresh_flag() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--refresh"));
+}
+
+#[test]
 fn version_works() {
     let mut cmd = Command::cargo_bin("pacseek").unwrap();
     cmd.arg("--version")
