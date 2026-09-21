@@ -626,6 +626,65 @@ fn draw_confirm_remove_popup(f: &mut Frame, pkg: &crate::model::Package, area: R
     f.render_widget(p, inner);
 }
 
+fn draw_confirm_refresh_popup(f: &mut Frame, area: Rect, app: &App) {
+    let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Confirm refresh ")
+        .borders(Borders::ALL)
+        .border_type(app.border_type)
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_title
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_bg
+        });
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    let text = vec![
+        Line::from("Refresh package databases?"),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "Y",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.installed
+                },
+            ),
+            Span::raw("/Enter = yes  "),
+            Span::styled(
+                "N/Esc",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.out_of_date
+                },
+            ),
+            Span::raw(" = cancel"),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Will run: sudo pacman -Sy [needs password]",
+            if app.no_color {
+                Style::default()
+            } else {
+                app.styles.text_dim
+            },
+        )),
+    ];
+    let p = Paragraph::new(text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(Wrap { trim: true });
+    f.render_widget(p, inner);
+}
+
 fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
     let sz: [u16; 2] = [70, 60];
     let popup_area = centered_rect(sz[0], sz[1], area);
