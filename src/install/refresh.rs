@@ -26,7 +26,10 @@ pub fn refresh_sync_db(cfg: &Config) -> anyhow::Result<()> {
         .stderr(std::process::Stdio::inherit());
     let status = cmd.status().context("failed to run sudo pacman -Sy")?;
     if !status.success() {
-        anyhow::bail!("pacman -Sy failed with exit {}", status.code().unwrap_or(-1));
+        anyhow::bail!(
+            "pacman -Sy failed with exit {}",
+            status.code().unwrap_or(-1)
+        );
     }
     Ok(())
 }

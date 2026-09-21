@@ -814,10 +814,9 @@ impl App {
     fn do_refresh(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         // Suspend TUI and run `sudo pacman -Sy` with inherited stdio (real TTY for sudo)
         let cfg = self.config.clone();
-        let refresh_result =
-            super::super::tui::suspend_and_run(terminal, move || {
-                crate::install::refresh::refresh_sync_db(&cfg)
-            });
+        let refresh_result = super::super::tui::suspend_and_run(terminal, move || {
+            crate::install::refresh::refresh_sync_db(&cfg)
+        });
 
         match refresh_result {
             Ok(()) => {
