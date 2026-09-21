@@ -66,6 +66,10 @@ pub struct Cli {
     #[arg(long, value_name = "PKG")]
     pub remove: Option<String>,
 
+    /// Refresh pacman sync databases (sudo pacman -Sy) and exit — non-TUI shortcut
+    #[arg(long)]
+    pub refresh: bool,
+
     /// Generate example config at default location and exit
     #[arg(long)]
     pub init_config: bool,

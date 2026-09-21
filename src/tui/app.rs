@@ -923,6 +923,7 @@ mod tests {
             init_config: false,
             show_config: false,
             remove: None,
+            refresh: false,
         };
         let app = App::new_with_cli("test".into(), &cli);
         assert_eq!(app.limit, 10);

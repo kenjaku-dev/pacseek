@@ -89,6 +89,23 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // --refresh fast path (no TUI, no search) — mirrors TUI r/F5 confirm in TUI
+    if cli.refresh {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        match pacseek::install::refresh::refresh_sync_db(&cfg) {
+            Ok(()) => {
+                println!("Sync databases refreshed");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("refresh failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Determine TUI mode per tui-design lifecycle + cli-basics
     // --tui forces TUI, --no-tui forces plain, --json forces plain, otherwise auto
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
