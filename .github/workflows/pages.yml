@@ -44,7 +44,7 @@ jobs:
       - name: Lint + typecheck
         run: |
           pnpm lint
-          pnpm exec tsc --noEmit
+          pnpm typecheck
 
       - name: Build static export
         run: pnpm build
