@@ -24,7 +24,7 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinux
           pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed base-devel rust rustfmt clippy git pkgconf pacman
+          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory '*'
 
