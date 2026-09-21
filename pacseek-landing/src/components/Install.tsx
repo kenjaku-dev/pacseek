@@ -4,7 +4,7 @@ import { Section } from "./ui/Section";
 const BLOCKS = [
   {
     label: "From source (recommended)",
-    command: `git clone https://github.com/achraf/pacseek
+    command: `git clone https://github.com/kenjaku-dev/pacseek
 cd pacseek
 cargo install --path . --force`,
   },

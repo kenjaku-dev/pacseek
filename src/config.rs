@@ -295,7 +295,7 @@ impl Config {
 
     pub fn example_toml() -> String {
         r#"# pacseek config — edit and save, changes apply on next launch
-# See: https://github.com/achraf/pacseek  — all fields optional
+# See: https://github.com/kenjaku-dev/pacseek  — all fields optional
 
 [search]
 limit = 50                 # 0 = no limit

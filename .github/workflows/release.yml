@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build · test · publish
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 45
+    steps:
+      - name: Install toolchain
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel rust rustfmt clippy git pkgconf pacman
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Verify
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked --test aur_nan --test tui_snapshot
+          pacman -Sy --noconfirm
+          cargo test --locked --test integration_search
+
+      - name: Build release binary
+        id: build
+        run: |
+          cargo build --release --locked
+          VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          STAGE="${RUNNER_TEMP}/pacseek-dist"
+          mkdir -p "$STAGE"
+          cp target/release/pacseek "$STAGE/pacseek"
+          strip "$STAGE/pacseek" || true
+          LICENSE=LICENSE
+          test -f LICENSE || LICENSE=README.md
+          cp "$LICENSE" "$STAGE/"
+          cp README.md "$STAGE/"
+          tar -C "$STAGE" -czf "${RUNNER_TEMP}/pacseek-${VERSION}-x86_64-linux.tar.gz" .
+          ls -lh target/release/pacseek "${RUNNER_TEMP}/pacseek-${VERSION}-x86_64-linux.tar.gz"
+          echo "artifact=${RUNNER_TEMP}/pacseek-${VERSION}-x86_64-linux.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacseek-${{ steps.build.outputs.version }}-x86_64-linux
+          path: ${{ steps.build.outputs.artifact }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: pacseek ${{ steps.build.outputs.version }}
+          files: ${{ steps.build.outputs.artifact }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true

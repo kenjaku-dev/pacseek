@@ -48,7 +48,7 @@ export function Footer() {
           <p className="text-xs text-muted-foreground">
             {SITE.name} v{SITE.version} is released under the{" "}
             <a
-              href={`${SITE.github}/blob/master/LICENSE`}
+              href={`${SITE.github}/blob/main/LICENSE`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-foreground underline decoration-border underline-offset-2 transition-colors duration-200 hover:decoration-accent"

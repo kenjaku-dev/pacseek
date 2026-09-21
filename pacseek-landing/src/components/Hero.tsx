@@ -18,7 +18,7 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-const INSTALL_CMD = "cargo install --git https://github.com/achraf/pacseek";
+const INSTALL_CMD = "cargo install --git https://github.com/kenjaku-dev/pacseek";
 
 export function Hero() {
   const reduce = useReducedMotion();
@@ -78,7 +78,7 @@ export function Hero() {
               <ArrowDown aria-hidden="true" className="h-4 w-4" />
             </a>
             <a
-              href="https://github.com/achraf/pacseek"
+              href="https://github.com/kenjaku-dev/pacseek"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm text-muted-foreground transition-colors duration-200 hover:border-accent/50 hover:text-foreground"

@@ -4,9 +4,9 @@ export const SITE = {
   license: "MIT",
   platforms: "Arch / Artix",
   tagline: "Search Arch packages at terminal speed.",
-  github: "https://github.com/achraf/pacseek",
-  githubReadme: "https://github.com/achraf/pacseek#readme",
-  githubIssues: "https://github.com/achraf/pacseek/issues",
+  github: "https://github.com/kenjaku-dev/pacseek",
+  githubReadme: "https://github.com/kenjaku-dev/pacseek#readme",
+  githubIssues: "https://github.com/kenjaku-dev/pacseek/issues",
   year: 2026,
 } as const;
 

@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      landing: ${{ steps.filter.outputs.landing }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rustfmt.toml'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+            landing:
+              - 'pacseek-landing/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/pages.yml'
+
+  rust:
+    name: Rust (fmt · clippy · test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Trust workspace in container
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel rust rustfmt clippy git pkgconf pacman
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Unit tests (offline)
+        run: cargo test --locked --test aur_nan --test tui_snapshot
+
+      - name: Sync pacman DB + integration tests
+        run: |
+          pacman -Sy --noconfirm
+          cargo test --locked --test integration_search
+
+      - name: Release binary (size check)
+        run: |
+          cargo build --release --locked
+          ls -lh target/release/pacseek
+
+  landing:
+    name: Landing (lint · typecheck · build)
+    needs: changes
+    if: needs.changes.outputs.landing == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: pacseek-landing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pacseek-landing/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Build (static export)
+        run: pnpm build
+
+  ci-ok:
+    name: CI OK
+    needs: [changes, rust, landing]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require relevant jobs to succeed
+        run: |
+          rust="${{ needs.changes.outputs.rust }}"
+          landing="${{ needs.changes.outputs.landing }}"
+          rust_result="${{ needs.rust.result }}"
+          landing_result="${{ needs.landing.result }}"
+          echo "rust=$rust ($rust_result) landing=$landing ($landing_result)"
+
+          fail=0
+          if [ "$rust" = "true" ] && [ "$rust_result" != "success" ]; then
+            echo "::error::Rust CI failed or was cancelled"
+            fail=1
+          fi
+          if [ "$landing" = "true" ] && [ "$landing_result" != "success" ]; then
+            echo "::error::Landing CI failed or was cancelled"
+            fail=1
+          fi
+          if [ "$rust" != "true" ] && [ "$landing" != "true" ]; then
+            echo "No tracked paths changed — OK"
+          fi
+          exit "$fail"
