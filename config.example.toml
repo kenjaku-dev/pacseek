@@ -57,3 +57,4 @@ verbose = 0
 makepkg_noconfirm = false
 remove_flags = "Rs"
 remove_noconfirm = false
+refresh_noconfirm = false

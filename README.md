@@ -24,7 +24,8 @@ Built with **best skills**: `ratatui 0.30` (tui-design ecosystem-rust, immediate
 - **One-shot CLI:** `pacseek <query>` repo first, aur after — parallel tokio, `libalpm` local DB, fallback `pacman -Ss`
 - **TUI:** `pacseek --tui` or `pacseek` (no args, TTY) → tabs `Search` / `Installed` (`Tab` to switch) → search bar + virtualized `List` → `i` info / `?` help popup → `Enter` confirm → `sudo pacman -S` (repo) or `git clone + makepkg -si` (AUR, PKGBUILD preview, `namcap` if present, `~/.cache/pacseek`)
  - **Remover:** `Tab` → Installed mode (empty filter lists all, type to filter) → `Enter`/`d`/`x` remove → confirm popup (`sudo pacman -Rs`, `pacman -Qi` preview) → `pacseek --remove <pkg>` for scripts
- - Filters: `--source aur|repo|all`, `--by name|name-desc|maintainer...`, `--limit N`, `--regex`, `--installed-only`, `--bottom-up`, `--json`, `--no-color`, `--no-tui`, `--remove PKG`
+ - **Refresh:** `r`/`F5` in list → confirm popup → `sudo pacman -Sy` → cache cleared + re-query → `pacseek --refresh` for scripts
+ - Filters: `--source aur|repo|all`, `--by name|name-desc|maintainer...`, `--limit N`, `--regex`, `--installed-only`, `--bottom-up`, `--json`, `--no-color`, `--no-tui`, `--remove PKG`, `--refresh`
  - **Config:** `~/.config/pacseek/config.toml` (or `./pacseek.toml` project-local) — edit colors, borders, layout, timeouts without recompile — `pacseek --init-config` to generate, `--show-config` to locate, `--config PATH` to override
  - Safety: `aur-guides` — HTTPS sources, `makepkg` never as root via `nix::geteuid`, `PKGBUILD` shown, `tui-design` lifecycle `try_restore/try_init` + panic hook `color_eyre` before `ratatui::init`
 
@@ -58,10 +59,10 @@ pacseek firefox --bottom-up   # AUR first
 pacseek --tui               # empty search, type firefox → Enter
 pacseek --tui firefox       # prefilled query, immediate search
 pacseek                     # no args + TTY => TUI (like original pacseek)
-# Inside TUI: type query, Enter search, ↑↓/j k navigate, Enter install (confirm Y), i info, / search, Tab remover, ? help, q quit
-# Tab → Installed mode: type to filter, Enter/d/x remove (confirm Y), Tab back
-# Install needs sudo password; AUR shows PKGBUILD + namcap then makepkg -si; remove runs sudo pacman -Rs
-# CLI shortcut: pacseek --remove <pkg>
+# Inside TUI: type query, Enter search, ↑↓/j k navigate, Enter install (confirm Y), i info, r refresh (confirm Y), / search, Tab remover, ? help, q quit
+# Tab → Installed mode: type to filter, Enter/d/x remove (confirm Y), r refresh (confirm Y), Tab back
+# Install needs sudo password; AUR shows PKGBUILD + namcap then makepkg -si; remove runs sudo pacman -Rs; refresh runs sudo pacman -Sy
+# CLI shortcuts: pacseek --remove <pkg> | pacseek --refresh
 ```
 
 **Config (ez edit):**
@@ -73,7 +74,7 @@ cat ~/.config/pacseek/config.toml
 # [theme] border_focused="cyan" repo_aur="magenta bold" no_color=false tab_selected="black on cyan bold"
 # [tui] floor_width=60 floor_height=14 show_tabs=true border="rounded" highlight_symbol="▸ " debounce_ms=400
 # [search] limit=50 source="all" timeout_secs=15
-# [behavior] makepkg_noconfirm=false remove_flags="Rs" remove_noconfirm=false cache_dir="/tmp/pacseek"
+# [behavior] makepkg_noconfirm=false remove_flags="Rs" remove_noconfirm=false refresh_noconfirm=false cache_dir="/tmp/pacseek"
 # Project-local override: ./pacseek.toml (same format) wins over XDG
 pacseek --config ./my.toml firefox --no-tui
 ```
@@ -100,6 +101,7 @@ src/
   install/
     repo.rs      # sudo pacman -S --needed (aur-helpers)
     aur.rs       # git clone/pull, PKGBUILD bat/cat, makepkg -si, cache_dir + makepkg_noconfirm from config
+    refresh.rs   # sudo pacman -Sy + refresh_noconfirm from config
   error.rs
   config.example.toml  # ship example
 ```
