@@ -72,6 +72,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         Popup::Info(pkg) => draw_info_popup(f, pkg, area, app),
         Popup::Confirm(pkg) => draw_confirm_popup(f, pkg, area, app),
         Popup::ConfirmRemove(pkg) => draw_confirm_remove_popup(f, pkg, area, app),
+        Popup::ConfirmRefresh => draw_confirm_refresh_popup(f, area, app),
         Popup::Help => draw_help_popup(f, area, app),
         Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
@@ -353,13 +354,13 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             " Enter:search  Esc:list  Tab:remover  ?:help  Ctrl+C:quit "
         }
         (Mode::Search, Focus::List) => {
-            " ↑↓/j k:move  Enter:install  i:info  /:search  Tab:remover  ?:help  q:quit "
+            " ↑↓/j k:move  Enter:install  i:info  r:refresh  /:search  Tab:remover  ?:help  q:quit "
         }
         (Mode::Installed, Focus::Search) => {
             " Enter:filter  Esc:list  Tab:search  ?:help  Ctrl+C:quit "
         }
         (Mode::Installed, Focus::List) => {
-            " ↑↓/j k:move  Enter/d:remove  i:info  /:filter  Tab:search  ?:help  q:quit "
+            " ↑↓/j k:move  Enter/d:remove  i:info  r:refresh  /:filter  Tab:search  ?:help  q:quit "
         }
     };
     let p = Paragraph::new(help)
@@ -647,21 +648,22 @@ fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, popup_area);
     let lines = vec![
         Line::from("Tab / Shift+Tab : switch Search <-> Installed"),
-        Line::from("1 / 2           : (same as Tab, when not typing)"),
         Line::from(""),
         Line::from("Search mode:"),
         Line::from("  type + Enter  : search repo+AUR"),
         Line::from("  ↑↓ / j k      : navigate"),
         Line::from("  Enter         : install selected"),
         Line::from("  i             : package info"),
+        Line::from("  r / F5        : refresh sync DBs (confirm)"),
         Line::from(""),
         Line::from("Installed mode:"),
         Line::from("  type + Enter  : filter installed"),
         Line::from("  ↑↓ / j k      : navigate"),
         Line::from("  Enter / d / x : remove selected"),
         Line::from("  i             : package info"),
+        Line::from("  r / F5        : refresh sync DBs (confirm)"),
         Line::from(""),
-        Line::from("Global: / focus search, Esc focus toggle, ? help, q quit"),
+        Line::from("Global: / focus search, Esc focus toggle, ? help, q quit, r refresh"),
         Line::from(""),
         Line::from("Press Esc/q/Enter/? to close"),
     ];
