@@ -112,7 +112,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     let title = match (app.mode, app.focus) {
         (Mode::Search, Focus::Search) => " Search (Enter to search, F5 refresh, Tab remover) ",
         (Mode::Search, Focus::List) => " Search (/ to focus, F5 refresh, Tab remover) ",
-        (Mode::Installed, Focus::Search) => " Filter installed (Enter filter, F5 refresh, Tab back) ",
+        (Mode::Installed, Focus::Search) => {
+            " Filter installed (Enter filter, F5 refresh, Tab back) "
+        }
         (Mode::Installed, Focus::List) => " Filter installed (/ to focus, F5 refresh, Tab back) ",
     };
     let style = if app.no_color {
