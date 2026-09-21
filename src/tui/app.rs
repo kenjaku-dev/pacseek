@@ -274,9 +274,9 @@ impl App {
         self.popup = Popup::None;
         self.search_rx = None;
         self.status = match self.mode {
-            Mode::Search => "Type to search, Enter to search, Tab remover, ? help".into(),
+            Mode::Search => "Type to search, Enter search, F5 refresh, Tab remover, ? help".into(),
             Mode::Installed => {
-                "Installed mode — type to filter, Enter to remove, Tab back, ? help".into()
+                "Installed mode — type to filter, Enter remove, F5 refresh, Tab back, ? help".into()
             }
         };
         // Installed with empty filter should list all; Search with empty clears.
