@@ -110,10 +110,10 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     let title = match (app.mode, app.focus) {
-        (Mode::Search, Focus::Search) => " Search (Enter to search, Esc to list, Tab remover) ",
-        (Mode::Search, Focus::List) => " Search (press / to focus, Tab remover) ",
-        (Mode::Installed, Focus::Search) => " Filter installed (Enter to filter, Tab back) ",
-        (Mode::Installed, Focus::List) => " Filter installed (press / to focus, Tab back) ",
+        (Mode::Search, Focus::Search) => " Search (Enter to search, F5 refresh, Tab remover) ",
+        (Mode::Search, Focus::List) => " Search (/ to focus, F5 refresh, Tab remover) ",
+        (Mode::Installed, Focus::Search) => " Filter installed (Enter filter, F5 refresh, Tab back) ",
+        (Mode::Installed, Focus::List) => " Filter installed (/ to focus, F5 refresh, Tab back) ",
     };
     let style = if app.no_color {
         Style::default()
