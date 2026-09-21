@@ -56,6 +56,7 @@ pub enum Popup {
     Info(Package),
     Confirm(Package),
     ConfirmRemove(Package),
+    ConfirmRefresh,
     Help,
     Message(String),
 }
@@ -401,7 +402,7 @@ impl App {
                             }
                         }
                         KeyCode::Enter => {
-                            // Confirm install / remove
+                            // Confirm install / remove / refresh
                             match self.popup.clone() {
                                 Popup::Confirm(pkg) => {
                                     self.popup = Popup::None;
@@ -410,6 +411,10 @@ impl App {
                                 Popup::ConfirmRemove(pkg) => {
                                     self.popup = Popup::None;
                                     self.do_remove(pkg, terminal)?;
+                                }
+                                Popup::ConfirmRefresh => {
+                                    self.popup = Popup::None;
+                                    self.do_refresh(terminal)?;
                                 }
                                 _ => {
                                     self.popup = Popup::None;
@@ -424,6 +429,10 @@ impl App {
                             Popup::ConfirmRemove(pkg) => {
                                 self.popup = Popup::None;
                                 self.do_remove(pkg, terminal)?;
+                            }
+                            Popup::ConfirmRefresh => {
+                                self.popup = Popup::None;
+                                self.do_refresh(terminal)?;
                             }
                             _ => {}
                         },
@@ -447,6 +456,14 @@ impl App {
                 }
                 KeyCode::Char('?') if self.focus == Focus::List && self.popup == Popup::None => {
                     self.popup = Popup::Help;
+                }
+                KeyCode::Char('r') | KeyCode::Char('R')
+                    if self.focus == Focus::List && self.popup == Popup::None =>
+                {
+                    self.popup = Popup::ConfirmRefresh;
+                }
+                KeyCode::F(5) if self.focus == Focus::List && self.popup == Popup::None => {
+                    self.popup = Popup::ConfirmRefresh;
                 }
                 KeyCode::Char('q') if self.focus == Focus::List && self.popup == Popup::None => {
                     // In search focus, q should type, not quit. Only quit from list mode when not typing
@@ -791,6 +808,38 @@ impl App {
         self.clear_cache();
         self.dirty = true;
         self.trigger_search();
+        Ok(())
+    }
+
+    fn do_refresh(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        // Suspend TUI and run `sudo pacman -Sy` with inherited stdio (real TTY for sudo)
+        let cfg = self.config.clone();
+        let refresh_result =
+            super::super::tui::suspend_and_run(terminal, move || {
+                crate::install::refresh::refresh_sync_db(&cfg)
+            });
+
+        match refresh_result {
+            Ok(()) => {
+                self.status = "Sync databases refreshed".into();
+                self.popup = Popup::Message("✓ Sync databases refreshed".into());
+            }
+            Err(e) => {
+                self.status = format!("Refresh failed: {e}");
+                self.popup = Popup::Message(format!("✗ Refresh failed: {e}"));
+            }
+        }
+        // Sync DBs changed — force re-query even if query==last_query
+        self.last_query.clear();
+        self.last_query_search.clear();
+        self.last_query_installed.clear();
+        self.clear_cache();
+        self.dirty = true;
+        let should_fetch = self.mode == Mode::Installed || !self.input.value().trim().is_empty();
+        if should_fetch {
+            self.is_loading = true;
+            self.trigger_search();
+        }
         Ok(())
     }
 }
