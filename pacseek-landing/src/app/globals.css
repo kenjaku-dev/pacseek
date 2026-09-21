@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --primary: #1e293b;
+  --secondary: #334155;
+  --accent: #22c55e;
+  --on-accent: #0f172a;
+  --accent-secondary: #38bdf8;
+  --card: #1b2336;
+  --muted: #272f42;
+  --muted-foreground: #94a3b8;
+  --border: #475569;
+  --destructive: #ef4444;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-secondary: var(--accent-secondary);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --font-mono: var(--font-jetbrains);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  text-rendering: optimizeLegibility;
+}
+
+/* Keep hash targets clear of the sticky header (h-14 = 3.5rem) */
+:where(section[id], main[id]) {
+  scroll-margin-top: 4rem;
+}
+
+/* State-aware sticky header — styles apply to the bar (descendant), per scroll-state rules */
+.site-header {
+  overflow-anchor: none;
+}
+
+.site-header-bar {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+@supports (container-type: scroll-state) {
+  .site-header {
+    container-type: scroll-state;
+    container-name: site-header;
+  }
+
+  @container site-header scroll-state(stuck: top) {
+    .site-header-bar {
+      background: color-mix(in srgb, var(--background) 94%, transparent);
+      border-color: var(--border);
+      box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+    }
+  }
+}
+
+/* Fallback stuck state (Firefox, Safari, older Chromium) */
+.site-header.is-stuck .site-header-bar {
+  background: color-mix(in srgb, var(--background) 94%, transparent);
+  border-color: var(--border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--foreground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
