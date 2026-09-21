@@ -88,3 +88,4 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.2.0
 - `git tag v0.2.0` annotated
 - `.gitignore` `/target`, `.opencode/skill` symlinks to global
 - `task.md` removed per request, replaced by this `context.md`
+
