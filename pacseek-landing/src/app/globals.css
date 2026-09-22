@@ -63,9 +63,20 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-jetbrains), ui-monospace, monospace);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
   text-rendering: optimizeLegibility;
   overflow-x: clip;
+}
+
+/* Keep hash targets clear of the sticky header (h-14 = 3.5rem) */
+:where(section[id], main[id]) {
+  scroll-margin-top: 4rem;
+}
+
+/* Defer rendering of below-the-fold sections (intrinsic size avoids CLS) */
+.cv-section {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 640px;
 }
 
 /* State-aware sticky header — styles apply to the bar (descendant), per scroll-state rules */
