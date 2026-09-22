@@ -63,6 +63,15 @@ export function Footer() {
           </p>
           <BackToTop />
         </div>
+
+        <div
+          aria-hidden="true"
+          className="pointer-events-none mt-14 select-none overflow-hidden"
+        >
+          <p className="bg-gradient-to-b from-muted to-transparent bg-clip-text text-center text-[clamp(4rem,15vw,11rem)] font-bold leading-[0.82] tracking-tight text-transparent">
+            {SITE.name}
+          </p>
+        </div>
       </div>
     </footer>
   );
