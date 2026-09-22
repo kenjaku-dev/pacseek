@@ -244,6 +244,92 @@ body {
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
 }
 
+/* ----------------------------------------------------------------- */
+/* Spotlight cards — pointer-tracked radial glow + border reveal.    */
+/* Registered custom property lets the hover fade interpolate.       */
+/* ----------------------------------------------------------------- */
+
+@property --spot-opacity {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.spotlight-card {
+  position: relative;
+}
+
+.spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    340px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    color-mix(in srgb, var(--accent) 10%, transparent),
+    transparent 70%
+  );
+  opacity: var(--spot-opacity);
+  transition: --spot-opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.spotlight-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(
+    220px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    transparent 75%
+  );
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  opacity: var(--spot-opacity);
+  transition: --spot-opacity 0.35s ease;
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .spotlight-card:hover {
+    --spot-opacity: 1;
+  }
+}
+
+/* ---------------------- */
+/* Shared visual utility  */
+/* ---------------------- */
+
+.text-gradient {
+  background: linear-gradient(92deg, var(--accent) 10%, var(--accent-secondary) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.btn-primary-glow {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 8px 28px -8px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition:
+    box-shadow 0.25s ease,
+    translate 0.25s ease,
+    opacity 0.2s ease;
+}
+
+.btn-primary-glow:hover {
+  translate: 0 -1px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 12px 36px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
 ::selection {
   background: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--foreground);
