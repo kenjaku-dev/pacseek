@@ -106,7 +106,7 @@ export function MobileNav({ open, onOpenChange, activeHref }: MobileNavProps) {
               animate={{ opacity: 1, y: 0 }}
               exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className="fixed inset-x-0 top-14 z-50 border-b border-border bg-background/95 px-5 pb-6 pt-3 backdrop-blur-md sm:hidden"
+              className="fixed inset-x-0 top-14 z-50 border-b border-border bg-background px-5 pb-6 pt-3 sm:hidden"
             >
               <NavLinks
                 activeHref={activeHref}
