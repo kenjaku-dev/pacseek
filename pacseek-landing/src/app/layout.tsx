@@ -35,6 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${jetbrains.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
+        <AuroraBackground />
         <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
