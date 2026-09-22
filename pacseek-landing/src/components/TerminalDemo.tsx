@@ -95,7 +95,7 @@ export function TerminalDemo() {
     <div
       role="img"
       aria-label="pacseek terminal demo: searching for firefox in official repos and the AUR"
-      className="w-full overflow-hidden rounded-lg border border-border bg-card shadow-[0_0_40px_rgba(34,197,94,0.06)]"
+      className="w-full overflow-hidden rounded-[11px] bg-card"
     >
       <div className="flex items-center gap-2 border-b border-border/70 bg-muted/60 px-3 py-2">
         <span className="h-2.5 w-2.5 rounded-full bg-destructive/80" aria-hidden="true" />
