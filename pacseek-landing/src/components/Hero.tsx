@@ -95,3 +95,74 @@ export function Hero() {
               Source
             </a>
           </motion.div>
+
+          <motion.div
+            initial={reduce ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease, delay: 0.24 }}
+            className="mt-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+          >
+            <code className="rounded-md border border-border bg-card/80 px-2.5 py-1.5 text-[11px] text-accent-secondary backdrop-blur-sm sm:text-xs">
+              {INSTALL_CMD}
+            </code>
+            <CopyButton text={INSTALL_CMD} label="Copy install command" />
+          </motion.div>
+
+          <motion.dl
+            initial={reduce ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease, delay: 0.3 }}
+            className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/40 pt-5"
+          >
+            {SHORTCUTS.map((shortcut) => (
+              <div key={shortcut.label} className="flex items-center gap-1.5">
+                <dt className="sr-only">{shortcut.label}</dt>
+                <dd className="flex items-center gap-1" aria-hidden="true">
+                  {shortcut.keys.map((key) => (
+                    <Kbd key={key}>{key}</Kbd>
+                  ))}
+                </dd>
+                <dd className="text-[11px] text-muted-foreground">
+                  {shortcut.label}
+                </dd>
+              </div>
+            ))}
+          </motion.dl>
+        </div>
+
+        <motion.div
+          initial={reduce ? false : { opacity: 0, y: 24, rotateX: 6 }}
+          animate={{ opacity: 1, y: 0, rotateX: 0 }}
+          transition={{ duration: 0.6, ease, delay: 0.15 }}
+          className="relative w-full [perspective:1200px]"
+        >
+          <div
+            aria-hidden="true"
+            className="absolute -inset-8 rounded-[2rem] bg-[radial-gradient(ellipse_60%_60%_at_50%_40%,color-mix(in_srgb,var(--accent)_14%,transparent),transparent)] blur-2xl"
+          />
+          <div className="relative rounded-xl bg-gradient-to-b from-accent/40 via-border/50 to-border/20 p-px shadow-[0_24px_70px_-20px_rgba(0,0,0,0.7)]">
+            <TerminalDemo />
+          </div>
+        </motion.div>
+      </div>
+
+      <motion.a
+        href="#features"
+        aria-label="Scroll to features"
+        initial={reduce ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.9, duration: 0.5 }}
+        className="group absolute inset-x-0 bottom-5 mx-auto hidden w-max cursor-pointer flex-col items-center gap-1.5 text-muted-foreground transition-colors duration-200 hover:text-foreground sm:flex"
+      >
+        <span className="text-[10px] uppercase tracking-[0.25em]">scroll</span>
+        <motion.span
+          animate={reduce ? undefined : { y: [0, 5, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </motion.span>
+      </motion.a>
+    </section>
+  );
+}
+
