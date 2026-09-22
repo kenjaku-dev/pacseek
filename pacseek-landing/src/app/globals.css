@@ -345,11 +345,12 @@ body {
     scroll-behavior: auto;
   }
 
+  /* Disable keyframe animations entirely; keep near-instant transitions
+     so state changes (hover/focus) don't become jarring. */
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    animation: none !important;
     transition-duration: 0.01ms !important;
   }
 }
