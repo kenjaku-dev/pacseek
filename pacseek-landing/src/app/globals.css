@@ -79,6 +79,137 @@ body {
   contain-intrinsic-block-size: auto 640px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Aurora background — animated gradient orbs + terminal grid + noise */
+/* ------------------------------------------------------------------ */
+
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.aurora-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  will-change: transform;
+}
+
+.aurora-orb-1 {
+  width: 55vw;
+  height: 55vw;
+  inset: -22vw auto auto -16vw;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent) 15%, transparent),
+    transparent 65%
+  );
+  animation: orb-drift-1 26s ease-in-out infinite alternate;
+}
+
+.aurora-orb-2 {
+  width: 46vw;
+  height: 46vw;
+  inset: 6vh -14vw auto auto;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent-secondary) 12%, transparent),
+    transparent 65%
+  );
+  animation: orb-drift-2 34s ease-in-out infinite alternate;
+}
+
+.aurora-orb-3 {
+  width: 42vw;
+  height: 42vw;
+  inset: auto auto -26vh 22vw;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent-tertiary) 9%, transparent),
+    transparent 65%
+  );
+  animation: orb-drift-3 40s ease-in-out infinite alternate;
+}
+
+@keyframes orb-drift-1 {
+  to {
+    transform: translate3d(7vw, 5vh, 0) scale(1.15);
+  }
+}
+
+@keyframes orb-drift-2 {
+  to {
+    transform: translate3d(-6vw, 8vh, 0) scale(1.1);
+  }
+}
+
+@keyframes orb-drift-3 {
+  to {
+    transform: translate3d(5vw, -6vh, 0) scale(1.2);
+  }
+}
+
+.aurora-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 90% 65% at 50% 0%, black 25%, transparent 78%);
+  -webkit-mask-image: radial-gradient(
+    ellipse 90% 65% at 50% 0%,
+    black 25%,
+    transparent 78%
+  );
+}
+
+.aurora-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* -------------------------------------------------------------- */
+/* Scroll progress bar — scroll-driven animation, decorative only */
+/* -------------------------------------------------------------- */
+
+@keyframes scroll-progress-grow {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.scroll-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 70;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  animation: scroll-progress-grow linear both;
+  animation-timeline: scroll(root);
+}
+
+@supports not (animation-timeline: scroll(root)) {
+  .scroll-progress {
+    display: none;
+  }
+}
+
 /* State-aware sticky header — styles apply to the bar (descendant), per scroll-state rules */
 .site-header {
   overflow-anchor: none;
