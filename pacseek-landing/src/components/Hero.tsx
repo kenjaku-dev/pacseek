@@ -122,7 +122,7 @@ export function Hero() {
                     <Kbd key={key}>{key}</Kbd>
                   ))}
                 </dd>
-                <dd className="text-[11px] text-muted-foreground">
+                <dd aria-hidden="true" className="text-[11px] text-muted-foreground">
                   {shortcut.label}
                 </dd>
               </div>
@@ -134,7 +134,8 @@ export function Hero() {
           initial={reduce ? false : { opacity: 0, y: 24, rotateX: 6 }}
           animate={{ opacity: 1, y: 0, rotateX: 0 }}
           transition={{ duration: 0.6, ease, delay: 0.15 }}
-          className="relative w-full [perspective:1200px]"
+          transformPerspective={1200}
+          className="relative w-full"
         >
           <div
             aria-hidden="true"
