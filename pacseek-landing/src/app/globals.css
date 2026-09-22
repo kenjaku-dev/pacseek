@@ -1,17 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0f172a;
-  --foreground: #f8fafc;
+  color-scheme: dark;
+  --background: #080d17;
+  --foreground: #f1f5f9;
   --primary: #1e293b;
   --secondary: #334155;
   --accent: #22c55e;
-  --on-accent: #0f172a;
+  --on-accent: #07131f;
   --accent-secondary: #38bdf8;
-  --card: #1b2336;
-  --muted: #272f42;
+  --accent-tertiary: #a78bfa;
+  --card: #0f1728;
+  --muted-solid: #162033;
   --muted-foreground: #94a3b8;
-  --border: #475569;
+  --border: #2a3a55;
   --destructive: #ef4444;
 }
 
@@ -23,8 +25,9 @@
   --color-accent: var(--accent);
   --color-on-accent: var(--on-accent);
   --color-accent-secondary: var(--accent-secondary);
+  --color-accent-tertiary: var(--accent-tertiary);
   --color-card: var(--card);
-  --color-muted: var(--muted);
+  --color-muted: var(--muted-solid);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
@@ -33,18 +36,36 @@
 
 html {
   scroll-behavior: smooth;
+
+  /* Custom scrollbar (Baseline newly available; WebKit fallback below) */
+  --scrollbar-thumb: var(--muted-solid);
+  --scrollbar-track: transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-family: var(--font-jetbrains), ui-monospace, monospace);
   text-rendering: optimizeLegibility;
-}
-
-/* Keep hash targets clear of the sticky header (h-14 = 3.5rem) */
-:where(section[id], main[id]) {
-  scroll-margin-top: 4rem;
+  overflow-x: clip;
 }
 
 /* State-aware sticky header — styles apply to the bar (descendant), per scroll-state rules */
