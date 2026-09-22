@@ -134,7 +134,7 @@ export function Hero() {
           initial={reduce ? false : { opacity: 0, y: 24, rotateX: 6 }}
           animate={{ opacity: 1, y: 0, rotateX: 0 }}
           transition={{ duration: 0.6, ease, delay: 0.15 }}
-          transformPerspective={1200}
+          style={{ transformPerspective: 1200 }}
           className="relative w-full"
         >
           <div
