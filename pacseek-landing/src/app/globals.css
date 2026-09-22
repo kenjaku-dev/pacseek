@@ -73,12 +73,6 @@ body {
   scroll-margin-top: 4rem;
 }
 
-/* Defer rendering of below-the-fold sections (intrinsic size avoids CLS) */
-.cv-section {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto 640px;
-}
-
 /* ------------------------------------------------------------------ */
 /* Aurora background — animated gradient orbs + terminal grid + noise */
 /* ------------------------------------------------------------------ */

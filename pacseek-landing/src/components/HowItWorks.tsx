@@ -27,7 +27,7 @@ export function HowItWorks() {
     <Section
       id="how"
       labelledBy="how-heading"
-      className="cv-section border-y border-border/50 bg-muted/20"
+      className="border-y border-border/50 bg-muted/20"
     >
       <div className="mx-auto w-full max-w-5xl px-5 py-16 sm:px-8 sm:py-24">
         <div className="mb-12 max-w-2xl">

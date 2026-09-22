@@ -105,7 +105,7 @@ export function Features() {
     <Section
       id="features"
       labelledBy="features-heading"
-      className="cv-section mx-auto w-full max-w-5xl px-5 py-16 sm:px-8 sm:py-24"
+      className="mx-auto w-full max-w-5xl px-5 py-16 sm:px-8 sm:py-24"
     >
       <div className="mb-10 max-w-2xl">
         <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.25em] text-accent">
