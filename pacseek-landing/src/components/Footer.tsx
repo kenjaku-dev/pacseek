@@ -4,7 +4,11 @@ import { FOOTER_COLUMNS, SITE } from "@/lib/site";
 
 export function Footer() {
   return (
-    <footer className="border-t border-border/60 bg-background">
+    <footer className="relative border-t border-border/60">
+      <div
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/50 to-transparent"
+      />
       <div className="mx-auto w-full max-w-5xl px-5 pb-8 pt-12 sm:px-8">
         <div className="grid grid-cols-1 gap-10 sm:grid-cols-[1.4fr_1fr_1fr]">
           <div className="max-w-sm">

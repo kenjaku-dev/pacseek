@@ -28,7 +28,8 @@ export function SiteHeader() {
         data-stuck={stuck ? "true" : "false"}
         className="site-header sticky top-0 z-50"
       >
-        <div className="site-header-bar border-b border-border/60 bg-background/85 backdrop-blur-md">
+        <div aria-hidden="true" className="scroll-progress" />
+        <div className="site-header-bar border-b border-border/60 bg-background/80 backdrop-blur-xl">
           <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-5 sm:px-8">
             <Logo />
 
