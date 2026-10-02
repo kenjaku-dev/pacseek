@@ -1,7 +1,7 @@
 # pacseek — Project Context
 
 ## Overview
-Fast **AUR + Official Repo** search + TUI install for Arch/Artix, Rust `0.2.0`, at `/home/achraf/Projects/pacseek` (`pacseek` binary, `MIT`).
+Fast **AUR + Official Repo** search + TUI install for Arch/Artix, Rust `0.3.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
 One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info.
 
 ```
@@ -16,10 +16,10 @@ One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc
 ```
 
 ## Tech Stack
-- `rust 1.85+` (MSRV 1.88 for `ratatui 0.30`), `edition 2024`, `tokio full`, `reqwest 0.12` (json+rustls+blocking via OnceLock), `alpm 5` + `pacmanconf 3`, `raur 8`, `clap 4.5` derive, `serde`/`serde_json`/`toml 0.8`, `anyhow`/`thiserror`, `colored 2`, `indicatif 0.17`, `tracing 0.1`, `regex 1`, `url 2`
+- `rust 1.85+` (MSRV 1.88 for `ratatui 0.30`), `edition 2024`, `tokio` (`rt-multi-thread` + `macros`), `reqwest 0.12` (json+rustls+blocking via OnceLock), `alpm 5` + `pacmanconf 3`, `clap 4.5` derive, `serde`/`serde_json`/`toml 0.8`, `anyhow`/`thiserror`, `colored 2`, `indicatif 0.17`, `tracing 0.1`, `regex 1`, `url 2`
 - TUI: `ratatui 0.30` `crossterm 0.29` `tui-input 0.15` `color-eyre 0.6` `dirs 5` `nix 0.29` `unicode-width 0.2` `signal-hook 0.3`
 - Config: `~/.config/pacseek/config.toml` + `./pacseek.toml` project-local, `[search]/[tui]/[theme]/[behavior]` via `crate::config::Config` (serde TOML, defaults < file < env < CLI)
-- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.6M** `target/release/pacseek`, `dev` `opt-level 0`
+- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.1M** `target/release/pacseek`, `dev` `opt-level 0`
 
 ## Architecture
 ```
@@ -27,7 +27,7 @@ src/
   main.rs       # IsTerminal, --tui/--no-tui/--json, Config::load + CLI merge (defaults < file < env < CLI), tokio::join! parallel repo+aur, spinner from config
   lib.rs        # pub mod cli/config/install/model/output/search/tui
   cli.rs        # Clap derive, query:Option<String>, Source (All/Aur/Repo), AurBy (name/name-desc...), limit 50, regex, installed_only, bottom_up, verbose, no_color, no_tui, tui, --config/--init-config/--show-config
-  config.rs     # Config {search,tui,theme,behavior} serde TOML, XDG ~/.config/pacseek/config.toml + ./pacseek.toml, example_toml(), parse_style/border_type, aur_rpc/cache_dir helpers, 4 tests
+  config.rs     # Config {search,tui,theme,behavior} serde TOML, XDG ~/.config/pacseek/config.toml + ./pacseek.toml, example_toml(), parse_style/border_type, aur_rpc/cache_dir helpers, 9 tests
   model.rs      # Package {name, version, description, repo, arch, url, installed, votes/popularity/out_of_date/maintainer/num_votes/last_modified} PartialEq
   search/
     aur.rs      # RPC v5 async + blocking, config aur_rpc + timeout (OnceLock vs per-call), NaN-safe sort (filter finite), regex client-side
@@ -43,10 +43,10 @@ src/
   error.rs
   config.example.toml # example ship
 tests/
-  integration_search.rs # help/version/repo/json (4)
-  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info popup (3)
+  integration_search.rs # help/version/repo/json (5)
+  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help popups, tabs (10)
   aur_nan.rs            # NaN sort, unicode truncate (2)
-  tui::app::tests       # trigger_search non-blocking, q in Search/List, filters, ListState (6) + config::tests (4) — total 15+2 doc
+  lib (src/)            # config 9 + install::remove 2 + tui::app 19 = 30 — total 47 + doc 0
 ```
 
 ## Skills Used
@@ -59,15 +59,15 @@ tests/
 ```bash
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
-cargo test # 15/15 (lib 10, aur_nan 2, integration 4, tui_snapshot 3) + doc 0
+cargo test # 47/47 (lib 30, aur_nan 2, integration 5, tui_snapshot 10) + doc 0
 pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
 pacseek --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
 cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info, /→search, q→quit
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
-cargo build --release # 5.6M stripped
-cargo install --path . --force # ~/.cargo/bin/pacseek 0.2.0
+cargo build --release # 5.1M stripped
+cargo install --path . --force # ~/.cargo/bin/pacseek 0.3.0
 ```
 
 ## Flows
@@ -80,12 +80,13 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.2.0
 - **C** bugs: Esc dedup, ListState None, CLI filters piped, NO_COLOR, pacman -Ss wrapped — `321b77d`
 - **D** polish: floor 60x13, help contextual, centered_rect manual, suspend flush/drain — `39523b3`
 - **E** hardening: votes alias, makepkg ask, /tmp 0o700 sanitize, shellcheck — `bc15b9f`
-- **F** release: fmt/clippy -D warnings, 5.4M, `v0.2.0` `31719f5` tag `v0.2.0`
-- **G** config: XDG + project-local TOML, [search]/[tui]/[theme]/[behavior], parse_style/border, --config/--init-config/--show-config, wired tui/ui + aur/install — `pending`
+- **F** release: fmt/clippy -D warnings, 5.4M, `v0.2.0` `31719f5` tag `v0.2.0` (historical)
+- **G** config: XDG + project-local TOML, [search]/[tui]/[theme]/[behavior], parse_style/border, --config/--init-config/--show-config, wired tui/ui + aur/install — done
+- **H** current: `0.3.0` (remover + refresh + 47 tests, 5.1M release) — no local git tag
 
 ## Repo
-- `master` 8 commits: `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0
-- `git tag v0.2.0` annotated
+- `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)
+- no local `git tag` (historical `v0.2.0` tag not present locally)
 - `.gitignore` `/target`, `.opencode/skill` symlinks to global
 - `task.md` removed per request, replaced by this `context.md`
 

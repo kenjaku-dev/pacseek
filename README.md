@@ -31,8 +31,11 @@ Built with **best skills**: `ratatui 0.30` (tui-design ecosystem-rust, immediate
 
 ## Install
 ```bash
-cd /home/achraf/Projects/pacseek
-cargo build --release  # 4.4M stripped, opt-level=z lto
+./install.sh  # automatic: deps + release build + install to /usr/local/bin
+# ./install.sh --user  # no-sudo alternative (-> ~/.cargo/bin)
+# manual:
+cd /home/achraf/projects/pacseek
+cargo build --release  # 5.1M stripped, opt-level=z lto
 sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek
 # or
 cargo install --path . --force  # -> ~/.cargo/bin/pacseek (add to PATH)

@@ -1,8 +1,15 @@
 # Quick Install (ez & butter)
 
+## 0. Automatic (recommended)
+```bash
+./install.sh              # build + sudo install to /usr/local/bin
+./install.sh --user       # or: no sudo, installs to ~/.cargo/bin
+./install.sh --help       # all flags (--prefix/--yes/--no-sync)
+```
+
 ## 1. One-liner build & install
 ```bash
-cd /home/achraf/Projects/pacseek
+cd /home/achraf/projects/pacseek
 make install        # or: cargo install --path . --force
 pacseek --help
 ```
@@ -24,7 +31,7 @@ pacseek rust --installed-only
 ## 4. Release binary
 ```bash
 make release
-ls -lh target/release/pacseek   # ~2-3 MB stripped
+ls -lh target/release/pacseek   # ~5.1M stripped
 sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek
 ```
 
@@ -38,7 +45,7 @@ pacseek --help | head   # helps discovery
 
 ## Update
 ```bash
-cd /home/achraf/Projects/pacseek
+cd /home/achraf/projects/pacseek
 git pull
 cargo install --path . --force
 ```
