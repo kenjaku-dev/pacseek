@@ -87,6 +87,16 @@ where
 
     // 2. Re-enter TUI — independent best-effort, per tui-design recipe (store child_result)
     let reinit = ratatui::try_init();
+    // Best-effort cleanup so a failed reentry never leaves the shell in a
+    // half-initialized state (raw mode / alt-screen) before reporting.
+    let cleanup_terminal = || {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+    };
     match (child_result, reinit) {
         (Ok(v), Ok(t)) => {
             *terminal = t;
@@ -98,9 +108,12 @@ where
             }
             Ok(v)
         }
-        (Ok(_v), Err(e)) => Err(color_eyre::eyre::eyre!(
-            "reentry failed after child success: {e}"
-        )),
+        (Ok(_v), Err(e)) => {
+            cleanup_terminal();
+            Err(color_eyre::eyre::eyre!(
+                "reentry failed after child success: {e}"
+            ))
+        }
         (Err(e), Ok(t)) => {
             *terminal = t;
             let _ = terminal.clear();
@@ -110,8 +123,11 @@ where
             }
             Err(e)
         }
-        (Err(e1), Err(e2)) => Err(color_eyre::eyre::eyre!(
-            "child failed: {e1}; reentry also failed: {e2}"
-        )),
+        (Err(e1), Err(e2)) => {
+            cleanup_terminal();
+            Err(color_eyre::eyre::eyre!(
+                "child failed: {e1}; reentry also failed: {e2}"
+            ))
+        }
     }
 }

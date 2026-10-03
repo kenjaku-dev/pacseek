@@ -111,6 +111,7 @@ pub struct TuiConfig {
     pub popup_info: Option<[u16; 2]>,
     pub popup_confirm: Option<[u16; 2]>,
     pub popup_message: Option<[u16; 2]>,
+    pub popup_help: Option<[u16; 2]>,
     #[serde(default)]
     pub tick_chars: Option<String>,
     #[serde(default)]
@@ -133,6 +134,7 @@ impl Default for TuiConfig {
             popup_info: Some([70, 60]),
             popup_confirm: Some([60, 30]),
             popup_message: Some([60, 20]),
+            popup_help: Some([70, 60]),
             tick_chars: None,
             spinner_template: None,
             debounce_ms: 400,
@@ -319,6 +321,7 @@ highlight_symbol = "▸ "   # set "" to disable
 popup_info = [70, 60]
 popup_confirm = [60, 30]
 popup_message = [60, 20]
+popup_help = [70, 60]
 # tick_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "
 # spinner_template = "{spinner:.cyan} {msg}"
 debounce_ms = 400
@@ -356,6 +359,8 @@ bottom_up = false
 verbose = 0
 # aur_rpc = "https://aur.archlinux.org/rpc/v5"
 # cache_dir = "/tmp/pacseek"
+# PACSEEK_NOCONFIRM=1 in the environment also enables the two flags below
+# (and skips --remove/--refresh confirmations) — handy for scripts.
 makepkg_noconfirm = false
 remove_flags = "Rs"        # R|Rs|Rns|Ru — sudo pacman -<flags>
 remove_noconfirm = false   # add --noconfirm to remove

@@ -75,11 +75,14 @@ mod tests {
     #[test]
     fn traversal_names_rejected() {
         let cfg = Config::default();
-        for bad in ["../x", "a/b", "a\\b", "a..b..c.."] {
-            // "a..b..c.." contains ".." -> rejected per policy
-            let _ = bad;
+        // ".." anywhere is rejected per policy (also covers "a..b..c.."),
+        // plus path separators and NUL.
+        for bad in ["../evil", "a/b", "a\\b", "a..b..c..", "..", "foo\0bar", ""] {
+            assert!(
+                remove_package_with_config(bad, &cfg).is_err(),
+                "{bad:?} should be rejected"
+            );
         }
-        assert!(remove_package_with_config("../evil", &cfg).is_err());
-        assert!(remove_package_with_config("a/b", &cfg).is_err());
+    }
     }
 }

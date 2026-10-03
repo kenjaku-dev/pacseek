@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -14,39 +15,30 @@ fn aur_rpc_with_config(cfg: &Config) -> String {
     cfg.aur_rpc_url()
 }
 
-static AUR_BLOCKING_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 /// Per-timeout client cache — building a blocking Client does TLS init, so
 /// reuse one per timeout value instead of constructing per search.
-static BLOCKING_CLIENTS: OnceLock<Mutex<HashMap<u64, reqwest::blocking::Client>>> = OnceLock::new();
+/// Returns `Result` (no `expect`): a TLS/client build failure must degrade to
+/// "no AUR results", never panic a TUI worker thread.
+static BLOCKING_CLIENTS: OnceLock<Mutex<HashMap<u64, reqwest::blocking::Client>>> =
+    OnceLock::new();
 
-fn blocking_client() -> &'static reqwest::blocking::Client {
-    AUR_BLOCKING_CLIENT.get_or_init(|| {
-        let timeout = Config::load().search.timeout_secs.max(1);
-        reqwest::blocking::Client::builder()
-            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(timeout))
-            .build()
-            .expect("failed to build blocking reqwest client")
-    })
-}
-
-fn blocking_client_for_timeout(secs: u64) -> reqwest::blocking::Client {
+fn blocking_client_for_timeout(secs: u64) -> anyhow::Result<reqwest::blocking::Client> {
     let secs = secs.max(1);
     let cache = BLOCKING_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache.lock() {
         if let Some(c) = guard.get(&secs) {
-            return c.clone();
+            return Ok(c.clone());
         }
     }
     let client = reqwest::blocking::Client::builder()
         .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(secs))
+        .timeout(Duration::from_secs(secs))
         .build()
-        .expect("failed to build blocking client");
+        .context("failed to build blocking reqwest client")?;
     if let Ok(mut guard) = cache.lock() {
         guard.insert(secs, client.clone());
     }
-    client
+    Ok(client)
 }
 
 /// Sort by popularity/votes desc (paru-style, NaN-safe), keeping only the top
@@ -121,7 +113,9 @@ impl From<AurPackage> for Package {
             url: p.url,
             installed: false,
             votes: p.num_votes,
-            popularity: p.popularity,
+            // Normalize non-finite values: serde_json renders NaN as null,
+            // which breaks numeric consumers (jq, scripts) downstream.
+            popularity: p.popularity.filter(|v| v.is_finite()),
             out_of_date: p.out_of_date,
             maintainer: p.maintainer,
             num_votes: p.num_votes,
@@ -239,12 +233,9 @@ pub fn search_aur_blocking_with_config(
     let url = format!("{}/search/{}?by={}", rpc, encoded, by);
     tracing::debug!(url=%url, "aur blocking request");
     let cfg_timeout = cfg.search.timeout_secs.max(1);
-    // Shared cached client per timeout (default 15 uses the process-wide OnceLock).
-    let client = if cfg_timeout == 15 {
-        blocking_client().clone()
-    } else {
-        blocking_client_for_timeout(cfg_timeout)
-    };
+    // Shared cached client per timeout — honors the caller's config, no extra
+    // `Config::load()` file IO on the search hot path.
+    let client = blocking_client_for_timeout(cfg_timeout)?;
     let resp = client
         .get(&url)
         .header(
@@ -280,4 +271,40 @@ pub fn search_aur_blocking_with_config(
     }
     sort_and_truncate(&mut results, limit);
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocking_client_builds_without_panic() {
+        // Builder-only: no network. Must be Ok, never panic (old expect()).
+        let cfg = Config::default();
+        let timeout = cfg.search.timeout_secs.max(1);
+        assert!(blocking_client_for_timeout(timeout).is_ok());
+        // Second call serves the per-timeout cache.
+        assert!(blocking_client_for_timeout(timeout).is_ok());
+    }
+
+    #[test]
+    fn nan_popularity_normalizes_to_none() {
+        let aur = AurPackage {
+            name: "x".into(),
+            package_base: None,
+            version: "1".into(),
+            description: None,
+            url: None,
+            num_votes: Some(3),
+            popularity: Some(f64::NAN),
+            out_of_date: None,
+            maintainer: None,
+            first_submitted: None,
+            last_modified: None,
+            depends: None,
+        };
+        let pkg = Package::from(aur);
+        assert_eq!(pkg.popularity, None);
+        assert_eq!(pkg.votes, Some(3));
+    }
 }

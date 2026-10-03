@@ -48,3 +48,31 @@ fn json_output_is_valid() {
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("json should be valid");
     assert!(v.is_array());
 }
+
+#[test]
+fn regex_recall_matches_substring() {
+    // Regression: --regex must find what substring search finds. The repo
+    // regex path scans all DB packages (never feeds the raw pattern to
+    // libalpm's literal search), so `firef.x` must match `firefox`.
+    for args in [
+        vec!["firefox", "--source", "repo", "--limit", "5", "--no-color"],
+        vec![
+            "firef.x",
+            "--source",
+            "repo",
+            "--limit",
+            "5",
+            "--no-color",
+            "--regex",
+        ],
+    ] {
+        let mut cmd = Command::cargo_bin("pacseek").unwrap();
+        let output = cmd.args(&args).output().unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        assert!(
+            stdout.contains("firefox"),
+            "args {args:?} should match firefox"
+        );
+    }
+}

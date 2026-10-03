@@ -169,8 +169,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 
     // Show cursor when focused
     if app.focus == Focus::Search {
-        // tui-input gives visual cursor, but we place native cursor for terminal
-        let x = area.x + 1 + (cursor_pos as u16).min(area.width.saturating_sub(3));
+        // tui-input gives visual cursor, but we place native cursor for terminal.
+        // When the query is tail-truncated ("...suffix"), shift the cursor left
+        // by the hidden width so it tracks the visible text; identical to the
+        // old computation when nothing is truncated.
+        let disp_width = display.width();
+        let hidden = input_width.saturating_sub(disp_width);
+        let vis = cursor_pos.saturating_sub(hidden).min(disp_width);
+        let x = area.x + 1 + (vis as u16).min(area.width.saturating_sub(3));
         let y = area.y + 1;
         f.set_cursor_position((x, y));
     }
@@ -688,7 +694,7 @@ fn draw_confirm_refresh_popup(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
-    let sz: [u16; 2] = [70, 60];
+    let sz = app.config.tui.popup_help.unwrap_or([70, 60]);
     let popup_area = centered_rect(sz[0], sz[1], area);
     f.render_widget(Clear, popup_area);
     let block = Block::default()
@@ -773,10 +779,35 @@ fn draw_message_popup(f: &mut Frame, msg: &str, area: Rect, app: &App) {
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    // Phase D5: cache-free, no Layout alloc — manual centered math (vs 2 Layout splits before)
-    let popup_width = r.width * percent_x / 100;
-    let popup_height = r.height * percent_y / 100;
+    // Phase D5: cache-free, no Layout alloc — manual centered math (vs 2 Layout splits before).
+    // Clamped to the area so oversized percents (>100) can never produce an
+    // out-of-bounds rect. u32 math: width * percent can overflow u16 on wide
+    // terminals (debug builds panic on overflow).
+    let popup_width = ((r.width as u32 * percent_x as u32) / 100).min(r.width as u32) as u16;
+    let popup_height = ((r.height as u32 * percent_y as u32) / 100).min(r.height as u32) as u16;
     let popup_x = r.x + (r.width.saturating_sub(popup_width)) / 2;
     let popup_y = r.y + (r.height.saturating_sub(popup_height)) / 2;
     Rect::new(popup_x, popup_y, popup_width, popup_height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_rect_stays_in_bounds() {
+        let area = Rect::new(0, 0, 80, 24);
+        let p = centered_rect(60, 30, area);
+        assert!(p.x + p.width <= area.width);
+        assert!(p.y + p.height <= area.height);
+        // Oversized percents clamp to the full area instead of overflowing.
+        let big = centered_rect(200, 200, area);
+        assert_eq!(
+            (big.x, big.y, big.width, big.height),
+            (0u16, 0u16, 80u16, 24u16)
+        );
+        // Degenerate area never underflows.
+        let tiny = centered_rect(60, 30, Rect::new(0, 0, 0, 0));
+        assert_eq!((tiny.width, tiny.height), (0u16, 0u16));
+    }
 }

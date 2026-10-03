@@ -1,8 +1,32 @@
 use anyhow::Context;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use crate::config::Config;
+
+/// Cached `which` lookups — one spawn per tool per process instead of three
+/// spawns on every AUR install.
+static TOOL_CACHE: OnceLock<Mutex<HashMap<&'static str, bool>>> = OnceLock::new();
+
+fn has_tool(name: &'static str) -> bool {
+    let cache = TOOL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(&found) = guard.get(name) {
+            return found;
+        }
+    }
+    let found = Command::new("which")
+        .arg(name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(name, found);
+    }
+    found
+}
 
 /// Install AUR package: git clone + makepkg -si (aur-guides:aur-makepkg, aur-pkgbuild)
 /// Follows AUR best practices: never run makepkg as root, show PKGBUILD, use --syncdeps
@@ -83,12 +107,7 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
     let pkgbuild = clone_dir.join("PKGBUILD");
     if pkgbuild.exists() {
         eprintln!("\n--- PKGBUILD: {} ---", pkgbuild.display());
-        let has_bat = Command::new("which")
-            .arg("bat")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let mut cmd = if has_bat {
+        let mut cmd = if has_tool("bat") {
             let mut c = Command::new("bat");
             c.args([
                 "--style=plain",
@@ -105,12 +124,7 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         eprintln!("--- end PKGBUILD ---\n");
 
         // Optional namcap audit if installed (aur-audit)
-        let has_namcap = Command::new("which")
-            .arg("namcap")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if has_namcap {
+        if has_tool("namcap") {
             eprintln!("Running namcap audit...");
             let _ = Command::new("namcap")
                 .arg(&pkgbuild)
@@ -121,12 +135,7 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         }
 
         // Optional shellcheck for PKGBUILD (aur-audit, aur-package-guidelines)
-        let has_shellcheck = Command::new("which")
-            .arg("shellcheck")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if has_shellcheck {
+        if has_tool("shellcheck") {
             eprintln!("Running shellcheck...");
             let _ = Command::new("shellcheck")
                 .args([

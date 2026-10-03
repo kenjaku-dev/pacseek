@@ -92,12 +92,19 @@ pub struct App {
     search_rx: Option<std::sync::mpsc::Receiver<(u64, Vec<Package>, String)>>,
     search_id: u64,
     next_search_id: u64,
+    /// Generation guard shared with worker threads: a trigger stores its id
+    /// here; workers skip `tx.send` when a newer search superseded them, so
+    /// stale threads never wake the UI with dead results.
+    active_search: Arc<std::sync::atomic::AtomicU64>,
     /// Small FIFO result cache (std-only) — retyping / tab-switching a recent
     /// query serves instantly with zero disk/network. Cleared on install/remove.
     search_cache: HashMap<String, Vec<Package>>,
     search_cache_order: VecDeque<String>,
     /// Redraw only when state changed (or while loading) instead of every poll tick.
     dirty: bool,
+    /// Last full draw — while a search is in flight without state changes,
+    /// redraws are throttled to ~2fps (spinner still animates, list rebuilds stop).
+    last_draw: Instant,
 }
 
 /// Max cached search results (each entry ≤ limit packages).
@@ -152,9 +159,11 @@ impl App {
             search_rx: None,
             search_id: 0,
             next_search_id: 0,
+            active_search: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             search_cache: HashMap::new(),
             search_cache_order: VecDeque::new(),
             dirty: true,
+            last_draw: Instant::now(),
         }
     }
 
@@ -319,13 +328,22 @@ impl App {
 
             // Redraw only on state change (or while a search is in flight),
             // instead of every poll tick — idle frames cost zero ListItem rebuilds.
+            // While loading with no state change, throttle to ~2fps: the status
+            // spinner still animates, but full list rebuilds stop hammering CPU
+            // on slow networks.
             if self.dirty || self.is_loading {
-                terminal.draw(|f| ui::draw(f, self))?;
-                self.dirty = false;
+                let throttled = !self.dirty
+                    && self.last_draw.elapsed() < Duration::from_millis(500);
+                if !throttled {
+                    terminal.draw(|f| ui::draw(f, self))?;
+                    self.last_draw = Instant::now();
+                    self.dirty = false;
+                }
             }
 
-            // poll with timeout to allow debounce & spinner & signal check
-            let poll_ms = self.config.tui.poll_ms.max(50);
+            // poll with timeout to allow debounce & spinner & signal check.
+            // Upper clamp: a huge poll_ms would freeze input handling.
+            let poll_ms = self.config.tui.poll_ms.clamp(50, 1000);
             if event::poll(Duration::from_millis(poll_ms))? {
                 let ev = event::read()?;
                 if self.handle_popup_event(&ev, terminal)? {
@@ -339,8 +357,9 @@ impl App {
             // Also poll after handling event for immediate fetch after Enter
             self.poll_search_results();
 
-            // Debounced search: if input changed and debounce passed without new key
-            let debounce = Duration::from_millis(self.config.tui.debounce_ms.max(50));
+            // Debounced search: if input changed and debounce passed without new key.
+            // Upper clamp: a huge debounce_ms would make Enter feel dead.
+            let debounce = Duration::from_millis(self.config.tui.debounce_ms.clamp(50, 5000));
             if self.focus == Focus::Search
                 && self.needs_search
                 && self.last_input_change.elapsed() > debounce
@@ -654,7 +673,10 @@ impl App {
             };
             self.next_search_id = self.next_search_id.wrapping_add(1);
             self.search_id = self.next_search_id;
+            self.active_search
+                .store(self.search_id, Ordering::Relaxed);
             let search_id = self.search_id;
+            let active = self.active_search.clone();
             let limit = self.limit;
             let use_regex = self.use_regex;
             let query_clone = query.clone();
@@ -662,8 +684,19 @@ impl App {
             self.search_rx = Some(rx);
             thread::spawn(move || {
                 let res = crate::search::repo::search_local(&query_clone, limit, use_regex)
-                    .or_else(|_| crate::search::repo::search_local_fallback(&query_clone, limit))
+                    .or_else(|_| {
+                        crate::search::repo::search_local_fallback(
+                            &query_clone,
+                            limit,
+                            use_regex,
+                        )
+                    })
                     .unwrap_or_default();
+                // Superseded while scanning (e.g. rapid Tab switches): drop the
+                // result instead of waking the UI with stale data.
+                if active.load(Ordering::Relaxed) != search_id {
+                    return;
+                }
                 let _ = tx.send((search_id, res, query_clone));
             });
             return;
@@ -694,7 +727,10 @@ impl App {
         self.status = format!("Searching for '{}'...", query);
         self.next_search_id = self.next_search_id.wrapping_add(1);
         self.search_id = self.next_search_id;
+        self.active_search
+            .store(self.search_id, Ordering::Relaxed);
         let search_id = self.search_id;
+        let active = self.active_search.clone();
         let limit = self.limit;
         let source = self.source;
         let aur_by = self.aur_by;
@@ -734,16 +770,33 @@ impl App {
             };
 
             let repo_res = repo_handle
-                .map(|h| h.join().unwrap_or_default())
+                .map(|h| match h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("repo worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                })
                 .unwrap_or_default();
             let aur_res = aur_handle
-                .map(|h| h.join().unwrap_or_default())
+                .map(|h| match h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("aur worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                })
                 .unwrap_or_default();
 
             let mut combined = Vec::with_capacity(repo_res.len() + aur_res.len());
             // Respect source order: repo first unless bottom_up handled in UI; keep repo+aur
             combined.extend(repo_res);
             combined.extend(aur_res);
+
+            // Superseded while workers ran: drop instead of waking the UI.
+            if active.load(Ordering::Relaxed) != search_id {
+                return;
+            }
 
             let _ = tx.send((search_id, combined, query_clone));
         });
@@ -857,6 +910,11 @@ mod tests {
 
     #[test]
     fn trigger_search_is_non_blocking() {
+        // Spawns real repo/AUR workers: hermetic for assertions (no result
+        // dependency), but pass PACSEEK_SKIP_LIVE=1 for fully offline runs.
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
         let mut app = App::new("firefox".into());
         let start = Instant::now();
         app.trigger_search();
@@ -949,6 +1007,11 @@ mod tests {
 
     #[test]
     fn tab_switches_to_installed_mode() {
+        // Installed mode triggers a real localdb scan thread; skip it when
+        // PACSEEK_SKIP_LIVE=1 is set for fully offline runs.
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
         let mut app = App::new("".into());
         assert_eq!(app.mode, Mode::Search);
         app.switch_mode();

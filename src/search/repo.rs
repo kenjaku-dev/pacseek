@@ -83,23 +83,23 @@ pub fn search_repo_with_config(
     for db in syncdbs.iter() {
         let db_name = db.name().to_string();
         if use_regex {
-            let list = match db.search([query].iter()) {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::warn!(db=%db_name, err=?e, "search failed");
-                    continue;
-                }
+            // NOTE: the raw query is a *regex*, not a literal — it must NOT be
+            // passed to libalpm's substring `db.search()` (e.g. `linux.*headers`
+            // matches nothing literally). Scan all packages and filter with the
+            // compiled regex instead (recall-first; same cost class as the
+            // substring path below).
+            let rx = match re.as_ref() {
+                Some(rx) => rx,
+                None => continue, // unreachable: built above when use_regex
             };
-            for pkg in list.iter() {
+            for pkg in db.pkgs().iter() {
                 let is_installed = localdb.pkg(pkg.name()).is_ok();
                 if installed_only && !is_installed {
                     continue;
                 }
-                if let Some(ref rx) = re {
-                    let desc = pkg.desc().unwrap_or("");
-                    if !rx.is_match(pkg.name()) && !rx.is_match(desc) {
-                        continue;
-                    }
+                let desc = pkg.desc().unwrap_or("");
+                if !rx.is_match(pkg.name()) && !rx.is_match(desc) {
+                    continue;
                 }
                 let version = pkg.version().to_string();
                 let desc_owned = pkg.desc().map(|s| s.to_string());
@@ -277,7 +277,13 @@ pub fn search_local_with_config(
 }
 
 /// Fallback for Remover mode when ALPM fails — parses `pacman -Q` output.
-pub fn search_local_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Package>> {
+/// `pacman -Q` has no descriptions, so regex (when enabled) matches the
+/// package name only — same recall contract as the ALPM path's name match.
+pub fn search_local_fallback(
+    query: &str,
+    limit: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<Package>> {
     use std::process::Command;
     let output = Command::new("pacman")
         .args(["-Q"])
@@ -287,7 +293,13 @@ pub fn search_local_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pa
         return Ok(vec![]);
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let q_lower = query.trim().to_lowercase();
+    let q = query.trim();
+    let q_lower = q.to_lowercase();
+    let re = if use_regex && !q.is_empty() {
+        Some(regex::RegexBuilder::new(q).case_insensitive(true).build()?)
+    } else {
+        None
+    };
     let mut results = Vec::new();
     for line in stdout.lines() {
         let mut parts = line.splitn(2, ' ');
@@ -296,8 +308,14 @@ pub fn search_local_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pa
         if name.is_empty() {
             continue;
         }
-        if !q_lower.is_empty() && !contains_ci(name, &q_lower) {
-            continue;
+        if !q.is_empty() {
+            if let Some(ref rx) = re {
+                if !rx.is_match(name) {
+                    continue;
+                }
+            } else if !contains_ci(name, &q_lower) {
+                continue;
+            }
         }
         results.push(Package {
             name: name.to_string(),
@@ -403,4 +421,41 @@ pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pac
         }
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `pacman -Q` backed: skips gracefully off-Arch (no pacman binary).
+    fn fallback_or_skip(query: &str, limit: usize, use_regex: bool) -> Option<Vec<Package>> {
+        match search_local_fallback(query, limit, use_regex) {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
+    }
+
+    #[test]
+    fn local_fallback_lists_and_filters() {
+        let Some(all) = fallback_or_skip("", 0, false) else {
+            return;
+        };
+        assert!(!all.is_empty(), "pacman -Q should list packages");
+        let Some(sub) = fallback_or_skip("pacma", 0, false) else {
+            return;
+        };
+        assert!(!sub.is_empty());
+        assert!(sub.iter().all(|p| p.name.contains("pacma")));
+    }
+
+    #[test]
+    fn local_fallback_regex_matches_names() {
+        let Some(res) = fallback_or_skip("^pacman", 0, true) else {
+            return;
+        };
+        assert!(!res.is_empty(), "pacman itself is always installed");
+        assert!(res.iter().all(|p| p.name.starts_with("pacman")));
+        // Invalid regex surfaces as Err like the ALPM path.
+        assert!(search_local_fallback("([", 0, true).is_err());
+    }
 }

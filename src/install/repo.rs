@@ -4,9 +4,15 @@ use std::process::Command;
 /// Install official repo package via sudo pacman -S (aur-guides:aur-pacman, aur-helpers)
 /// Delegates to pacman binary — safer than reimplementing alpm transaction per plan.
 pub fn install_repo_package(name: &str) -> anyhow::Result<()> {
-    // Guard: prevent empty name
-    if name.trim().is_empty() {
+    // Guard: prevent empty/traversal names — same policy as AUR install and
+    // remover paths (argv passing is already shell-safe; this is consistency).
+    let name = name.trim();
+    if name.is_empty() {
         anyhow::bail!("empty package name");
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0')
+    {
+        anyhow::bail!("invalid package name: {:?}", name);
     }
 
     // Check if already installed via pacman -Q (optional, just info)

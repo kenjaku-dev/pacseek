@@ -30,7 +30,8 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = AurBy::NameDesc, help = "AUR search by field")]
     pub by: AurBy,
 
-    /// Limit results per source (0 = no limit)
+    /// Limit results per source (0 = no limit). Repo side fills in pacman db
+    /// registration order, so small limits may miss later repos.
     #[arg(short, long, default_value_t = 50)]
     pub limit: usize,
 
@@ -62,11 +63,13 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Remove an installed package (sudo pacman -R) and exit — non-TUI shortcut for remover mode
+    /// Remove an installed package (sudo pacman -R) and exit — non-TUI shortcut for remover mode.
+    /// Asks to confirm on TTY; bypass with PACSEEK_NOCONFIRM=1 (also skips makepkg/refresh prompts).
     #[arg(long, value_name = "PKG")]
     pub remove: Option<String>,
 
-    /// Refresh pacman sync databases (sudo pacman -Sy) and exit — non-TUI shortcut
+    /// Refresh pacman sync databases (sudo pacman -Sy) and exit — non-TUI shortcut.
+    /// Asks to confirm on TTY; bypass with PACSEEK_NOCONFIRM=1.
     #[arg(long)]
     pub refresh: bool,
 

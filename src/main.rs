@@ -6,8 +6,9 @@ use tokio::task;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use pacseek::cli::{Cli, Source};
+use pacseek::confirm::{confirm_prompt, should_confirm};
 use pacseek::config::Config;
-use pacseek::output::print_packages;
+use pacseek::output::{print_json_error, print_packages};
 use pacseek::search::{search_aur_with_config, search_repo, search_repo_fallback};
 
 #[tokio::main]
@@ -72,10 +73,30 @@ async fn main() -> anyhow::Result<()> {
         cli.no_color = true;
     }
 
-    // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI
+    // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI.
+    // Destructive: confirm on TTY unless noconfirm; refuse silently-piped runs.
     if let Some(name) = cli.remove.clone() {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
+        }
+        let noconfirm = cfg.remove_noconfirm();
+        if should_confirm(noconfirm, std::io::stdin().is_terminal()) {
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut output = std::io::stderr();
+            if !confirm_prompt(
+                &format!("Remove '{}'?", name.trim()),
+                &mut input,
+                &mut output,
+            ) {
+                eprintln!("cancelled");
+                return Ok(());
+            }
+        } else if !noconfirm {
+            eprintln!(
+                "refusing to remove without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+            );
+            std::process::exit(2);
         }
         match pacseek::install::remove::remove_package_with_config(&name, &cfg) {
             Ok(()) => {
@@ -89,10 +110,30 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // --refresh fast path (no TUI, no search) — mirrors TUI r/F5 confirm in TUI
+    // --refresh fast path (no TUI, no search) — mirrors TUI r/F5 confirm in TUI.
+    // Runs sudo: confirm on TTY unless noconfirm; refuse silently-piped runs.
     if cli.refresh {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
+        }
+        let noconfirm = cfg.refresh_noconfirm();
+        if should_confirm(noconfirm, std::io::stdin().is_terminal()) {
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut output = std::io::stderr();
+            if !confirm_prompt(
+                "Refresh sync databases (sudo pacman -Sy)?",
+                &mut input,
+                &mut output,
+            ) {
+                eprintln!("cancelled");
+                return Ok(());
+            }
+        } else if !noconfirm {
+            eprintln!(
+                "refusing to refresh without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+            );
+            std::process::exit(2);
         }
         match pacseek::install::refresh::refresh_sync_db(&cfg) {
             Ok(()) => {
@@ -207,11 +248,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let aur_enabled = !matches!(cli.source, Source::Repo) && !cli.installed_only;
-    if cli.installed_only
-        && matches!(cli.source, Source::Aur | Source::All)
-        && !matches!(cli.source, Source::Repo)
-        && !cli.json
-    {
+    if cli.installed_only && !matches!(cli.source, Source::Repo) && !cli.json {
         eprintln!("Note: --installed-only only applies to repo packages, AUR results hidden");
     }
 
@@ -226,7 +263,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => {
                     tracing::error!(err=?e, "AUR search failed");
                     if cli.json {
-                        eprintln!("AUR error: {}", e);
+                        print_json_error(&format!("AUR error: {e}"));
                     } else {
                         eprintln!("AUR search error: {}", e);
                     }
