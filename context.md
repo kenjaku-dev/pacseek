@@ -1,7 +1,7 @@
 # pacseek — Project Context
 
 ## Overview
-Fast **AUR + Official Repo** search + TUI install for Arch/Artix, Rust `0.3.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
+Fast **AUR + Official Repo** search + TUI install for Arch/Artix, Rust `0.4.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
 One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info.
 
 ```
@@ -67,7 +67,7 @@ cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→co
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
 cargo build --release # 5.1M stripped
-cargo install --path . --force # ~/.cargo/bin/pacseek 0.3.0
+cargo install --path . --force # ~/.cargo/bin/pacseek 0.4.0
 ```
 
 ## Flows
@@ -82,7 +82,8 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.3.0
 - **E** hardening: votes alias, makepkg ask, /tmp 0o700 sanitize, shellcheck — `bc15b9f`
 - **F** release: fmt/clippy -D warnings, 5.4M, `v0.2.0` `31719f5` tag `v0.2.0` (historical)
 - **G** config: XDG + project-local TOML, [search]/[tui]/[theme]/[behavior], parse_style/border, --config/--init-config/--show-config, wired tui/ui + aur/install — done
-- **H** current: `0.3.0` (remover + refresh + 47 tests, 5.1M release) — no local git tag
+- **H** 0.3.0: remover + refresh + 47 tests, 5.1M release (historical)
+- **I** current `0.4.0`: repo-regex recall, --remove/--refresh confirm, no-expect AUR clients, worker cancel, draw throttle, popup_help, confirm module + tests — no local git tag
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)
