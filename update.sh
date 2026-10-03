@@ -42,6 +42,12 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Fail fast: a broken toolchain (Arch Rust/LLVM ABI skew) otherwise dies
+# mid-build with a cryptic `rustc -vV` error.
+if ! rustc -vV >/dev/null 2>&1; then
+  die "rustc is broken ($(rustc -vV 2>&1 | head -n 1)). Run: sudo pacman -Syu (partial upgrades break the Rust/LLVM ABI), then re-run $0"
+fi
+
 repo_version() {
   grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2
 }

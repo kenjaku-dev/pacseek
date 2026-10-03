@@ -42,6 +42,13 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Fail fast: a broken toolchain (Arch Rust/LLVM ABI skew) otherwise dies
+# mid-build with a cryptic `rustc -vV` error. This script never upgrades
+# present packages, so heal with `sudo pacman -Syu` first, then re-run.
+if ! rustc -vV >/dev/null 2>&1; then
+  die "rustc is broken ($(rustc -vV 2>&1 | head -n 1)). Run: sudo pacman -Syu, then re-run $0"
+fi
+
 # 1. Arch-family check (libalpm only exists here)
 if ! command -v pacman >/dev/null 2>&1; then
   die "pacman not found — pacseek needs Arch/Artix/CachyOS/Endeavour (libalpm). Generic Linux is not supported for repo search."
