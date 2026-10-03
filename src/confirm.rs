@@ -9,11 +9,7 @@ pub fn should_confirm(noconfirm: bool, stdin_tty: bool) -> bool {
 /// Ask `prompt` on `output`, read one line from `input`.
 /// Accepts `y`/`yes` (case-insensitive); anything else — including EOF —
 /// means no. Never panics on IO errors: failure to ask is a refusal.
-pub fn confirm_prompt(
-    prompt: &str,
-    input: &mut dyn BufRead,
-    output: &mut dyn Write,
-) -> bool {
+pub fn confirm_prompt(prompt: &str, input: &mut dyn BufRead, output: &mut dyn Write) -> bool {
     let _ = writeln!(output, "{} [y/N]", prompt);
     let _ = output.flush();
     let mut line = String::new();

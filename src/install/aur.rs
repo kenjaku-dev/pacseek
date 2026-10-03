@@ -12,10 +12,10 @@ static TOOL_CACHE: OnceLock<Mutex<HashMap<&'static str, bool>>> = OnceLock::new(
 
 fn has_tool(name: &'static str) -> bool {
     let cache = TOOL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some(&found) = guard.get(name) {
-            return found;
-        }
+    if let Ok(guard) = cache.lock()
+        && let Some(&found) = guard.get(name)
+    {
+        return found;
     }
     let found = Command::new("which")
         .arg(name)

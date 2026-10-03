@@ -10,8 +10,7 @@ pub fn install_repo_package(name: &str) -> anyhow::Result<()> {
     if name.is_empty() {
         anyhow::bail!("empty package name");
     }
-    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0')
-    {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
         anyhow::bail!("invalid package name: {:?}", name);
     }
 

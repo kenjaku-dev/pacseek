@@ -250,15 +250,15 @@ impl Config {
     }
 
     pub fn load() -> Self {
-        if let Some(p) = Self::project_path() {
-            if let Some(c) = Self::load_from(&p) {
-                return c;
-            }
+        if let Some(p) = Self::project_path()
+            && let Some(c) = Self::load_from(&p)
+        {
+            return c;
         }
-        if let Some(p) = Self::default_path() {
-            if let Some(c) = Self::load_from(&p) {
-                return c;
-            }
+        if let Some(p) = Self::default_path()
+            && let Some(c) = Self::load_from(&p)
+        {
+            return c;
         }
         Self::default()
     }

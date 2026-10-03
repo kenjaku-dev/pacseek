@@ -6,8 +6,8 @@ use tokio::task;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use pacseek::cli::{Cli, Source};
-use pacseek::confirm::{confirm_prompt, should_confirm};
 use pacseek::config::Config;
+use pacseek::confirm::{confirm_prompt, should_confirm};
 use pacseek::output::{print_json_error, print_packages};
 use pacseek::search::{search_aur_with_config, search_repo, search_repo_fallback};
 

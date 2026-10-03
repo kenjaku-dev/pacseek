@@ -19,16 +19,15 @@ fn aur_rpc_with_config(cfg: &Config) -> String {
 /// reuse one per timeout value instead of constructing per search.
 /// Returns `Result` (no `expect`): a TLS/client build failure must degrade to
 /// "no AUR results", never panic a TUI worker thread.
-static BLOCKING_CLIENTS: OnceLock<Mutex<HashMap<u64, reqwest::blocking::Client>>> =
-    OnceLock::new();
+static BLOCKING_CLIENTS: OnceLock<Mutex<HashMap<u64, reqwest::blocking::Client>>> = OnceLock::new();
 
 fn blocking_client_for_timeout(secs: u64) -> anyhow::Result<reqwest::blocking::Client> {
     let secs = secs.max(1);
     let cache = BLOCKING_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some(c) = guard.get(&secs) {
-            return Ok(c.clone());
-        }
+    if let Ok(guard) = cache.lock()
+        && let Some(c) = guard.get(&secs)
+    {
+        return Ok(c.clone());
     }
     let client = reqwest::blocking::Client::builder()
         .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))

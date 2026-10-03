@@ -1,6 +1,6 @@
 pub mod cli;
-pub mod confirm;
 pub mod config;
+pub mod confirm;
 pub mod error;
 pub mod install;
 pub mod model;

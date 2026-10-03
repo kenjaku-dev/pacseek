@@ -332,8 +332,8 @@ impl App {
             // spinner still animates, but full list rebuilds stop hammering CPU
             // on slow networks.
             if self.dirty || self.is_loading {
-                let throttled = !self.dirty
-                    && self.last_draw.elapsed() < Duration::from_millis(500);
+                let throttled =
+                    !self.dirty && self.last_draw.elapsed() < Duration::from_millis(500);
                 if !throttled {
                     terminal.draw(|f| ui::draw(f, self))?;
                     self.last_draw = Instant::now();
@@ -518,13 +518,13 @@ impl App {
                         self.focus = Focus::List;
                     } else if self.popup == Popup::None {
                         // Install or remove selected depending on mode
-                        if let Some(idx) = self.list_state.selected() {
-                            if let Some(pkg) = self.packages.get(idx).cloned() {
-                                self.popup = match self.mode {
-                                    Mode::Search => Popup::Confirm(pkg),
-                                    Mode::Installed => Popup::ConfirmRemove(pkg),
-                                };
-                            }
+                        if let Some(idx) = self.list_state.selected()
+                            && let Some(pkg) = self.packages.get(idx).cloned()
+                        {
+                            self.popup = match self.mode {
+                                Mode::Search => Popup::Confirm(pkg),
+                                Mode::Installed => Popup::ConfirmRemove(pkg),
+                            };
                         }
                     }
                 }
@@ -533,10 +533,10 @@ impl App {
                         && self.focus == Focus::List
                         && self.popup == Popup::None =>
                 {
-                    if let Some(idx) = self.list_state.selected() {
-                        if let Some(pkg) = self.packages.get(idx).cloned() {
-                            self.popup = Popup::ConfirmRemove(pkg);
-                        }
+                    if let Some(idx) = self.list_state.selected()
+                        && let Some(pkg) = self.packages.get(idx).cloned()
+                    {
+                        self.popup = Popup::ConfirmRemove(pkg);
                     }
                 }
                 KeyCode::Char('d')
@@ -547,18 +547,18 @@ impl App {
                         && self.focus == Focus::List
                         && self.popup == Popup::None =>
                 {
-                    if let Some(idx) = self.list_state.selected() {
-                        if let Some(pkg) = self.packages.get(idx).cloned() {
-                            self.popup = Popup::ConfirmRemove(pkg);
-                        }
+                    if let Some(idx) = self.list_state.selected()
+                        && let Some(pkg) = self.packages.get(idx).cloned()
+                    {
+                        self.popup = Popup::ConfirmRemove(pkg);
                     }
                 }
                 KeyCode::Char('i') | KeyCode::Char('I') => {
                     if self.focus == Focus::List && self.popup == Popup::None {
-                        if let Some(idx) = self.list_state.selected() {
-                            if let Some(pkg) = self.packages.get(idx).cloned() {
-                                self.popup = Popup::Info(pkg);
-                            }
+                        if let Some(idx) = self.list_state.selected()
+                            && let Some(pkg) = self.packages.get(idx).cloned()
+                        {
+                            self.popup = Popup::Info(pkg);
                         }
                     } else if self.focus == Focus::Search {
                         // type i in search
@@ -596,16 +596,14 @@ impl App {
                         }
                     } else {
                         // If typing in list mode (letter), jump to search and insert
-                        if let KeyCode::Char(c) = key.code {
-                            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                                && !key.modifiers.contains(KeyModifiers::ALT)
-                            {
-                                self.focus = Focus::Search;
-                                self.input.handle_event(ev);
-                                self.needs_search = true;
-                                self.last_input_change = Instant::now();
-                                let _ = c; // suppress unused
-                            }
+                        if let KeyCode::Char(_) = key.code
+                            && !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            self.focus = Focus::Search;
+                            self.input.handle_event(ev);
+                            self.needs_search = true;
+                            self.last_input_change = Instant::now();
                         }
                     }
                 }
@@ -673,8 +671,7 @@ impl App {
             };
             self.next_search_id = self.next_search_id.wrapping_add(1);
             self.search_id = self.next_search_id;
-            self.active_search
-                .store(self.search_id, Ordering::Relaxed);
+            self.active_search.store(self.search_id, Ordering::Relaxed);
             let search_id = self.search_id;
             let active = self.active_search.clone();
             let limit = self.limit;
@@ -685,11 +682,7 @@ impl App {
             thread::spawn(move || {
                 let res = crate::search::repo::search_local(&query_clone, limit, use_regex)
                     .or_else(|_| {
-                        crate::search::repo::search_local_fallback(
-                            &query_clone,
-                            limit,
-                            use_regex,
-                        )
+                        crate::search::repo::search_local_fallback(&query_clone, limit, use_regex)
                     })
                     .unwrap_or_default();
                 // Superseded while scanning (e.g. rapid Tab switches): drop the
@@ -727,8 +720,7 @@ impl App {
         self.status = format!("Searching for '{}'...", query);
         self.next_search_id = self.next_search_id.wrapping_add(1);
         self.search_id = self.next_search_id;
-        self.active_search
-            .store(self.search_id, Ordering::Relaxed);
+        self.active_search.store(self.search_id, Ordering::Relaxed);
         let search_id = self.search_id;
         let active = self.active_search.clone();
         let limit = self.limit;

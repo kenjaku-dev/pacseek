@@ -150,6 +150,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 
     // Cursor position for tui-input (visual width, not byte index)
     let cursor_pos = app.input.visual_cursor();
+    // Width now: `display` moves into the Paragraph below, so measure first.
+    let disp_width = display.width();
 
     let paragraph = Paragraph::new(display)
         .style(if app.no_color {
@@ -173,7 +175,6 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
         // When the query is tail-truncated ("...suffix"), shift the cursor left
         // by the hidden width so it tracks the visible text; identical to the
         // old computation when nothing is truncated.
-        let disp_width = display.width();
         let hidden = input_width.saturating_sub(disp_width);
         let vis = cursor_pos.saturating_sub(hidden).min(disp_width);
         let x = area.x + 1 + (vis as u16).min(area.width.saturating_sub(3));

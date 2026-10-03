@@ -429,10 +429,7 @@ mod tests {
 
     /// `pacman -Q` backed: skips gracefully off-Arch (no pacman binary).
     fn fallback_or_skip(query: &str, limit: usize, use_regex: bool) -> Option<Vec<Package>> {
-        match search_local_fallback(query, limit, use_regex) {
-            Ok(v) => Some(v),
-            Err(_) => None,
-        }
+        search_local_fallback(query, limit, use_regex).ok()
     }
 
     #[test]
