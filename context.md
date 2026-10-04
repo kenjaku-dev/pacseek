@@ -43,10 +43,10 @@ src/
   error.rs
   config.example.toml # example ship
 tests/
-  integration_search.rs # help/version/repo/json (5)
+  integration_search.rs # help/version/repo/json/regex-recall (6)
   tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help popups, tabs (10)
   aur_nan.rs            # NaN sort, unicode truncate (2)
-  lib (src/)            # config 9 + install::remove 2 + tui::app 19 = 30 — total 47 + doc 0
+  lib (src/)            # config 9 + remove 2 + tui::app 20 + aur 2 + repo-fallback 2 + ui 1 + confirm 3 = 39 — total 57 + doc 0
 ```
 
 ## Skills Used
@@ -59,7 +59,7 @@ tests/
 ```bash
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
-cargo test # 47/47 (lib 30, aur_nan 2, integration 5, tui_snapshot 10) + doc 0
+cargo test # 57/57 (lib 39, aur_nan 2, integration 6, tui_snapshot 10) + doc 0
 pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
 pacseek --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
@@ -83,7 +83,8 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.4.0
 - **F** release: fmt/clippy -D warnings, 5.4M, `v0.2.0` `31719f5` tag `v0.2.0` (historical)
 - **G** config: XDG + project-local TOML, [search]/[tui]/[theme]/[behavior], parse_style/border, --config/--init-config/--show-config, wired tui/ui + aur/install — done
 - **H** 0.3.0: remover + refresh + 47 tests, 5.1M release (historical)
-- **I** current `0.4.0`: repo-regex recall, --remove/--refresh confirm, no-expect AUR clients, worker cancel, draw throttle, popup_help, confirm module + tests — no local git tag
+- **I** `0.4.0`: repo-regex recall, --remove/--refresh confirm, no-expect AUR clients, worker cancel, draw throttle, popup_help, confirm module + tests
+- **J** orphan-spin fix: crossterm poll spins inside its fd-read loop on EIO (dead terminal) — no timeout, signals swallowed by EINTR-continue; parked watchdog probes stdio (/proc/self/fd re-open + zero-write) every 5s and exits 0 — verified e2e via pty harness (was 91% CPU forever, now self-exits rc 0)
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)

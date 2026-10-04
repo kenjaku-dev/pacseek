@@ -311,6 +311,21 @@ impl App {
             let _ = signal_hook::flag::register(signal_hook::consts::SIGHUP, term_flag.clone());
         }
 
+        // Orphan watchdog (see stdio_dead): if the terminal vanishes while we
+        // run (closed emulator, reparented to init), crossterm's poll spins
+        // inside its fd-read loop on EIO and never returns — no timeout, and
+        // its EINTR paths `continue`, so signal flags are never observed
+        // either (a spinning orphan even survives SIGTERM). A parked watchdog
+        // notices the dead stdio instead and exits quietly.
+        thread::spawn(|| {
+            loop {
+                thread::sleep(Duration::from_secs(5));
+                if stdio_dead() {
+                    std::process::exit(0);
+                }
+            }
+        });
+
         // If initial query provided, do first search immediately (no debounce) — now non-blocking
         if self.needs_search {
             self.trigger_search();
@@ -895,10 +910,57 @@ impl App {
     }
 }
 
+/// True when `path` (a `/proc/self/fd/N` link) is unusable: the link shows
+/// `(deleted)`, re-opening it fails (EIO once a pty is torn down), or a
+/// zero-byte write fails. Zero-byte writes are side-effect-free on live fds.
+/// Linux-only, like the rest of this binary.
+fn path_dead(path: &str) -> bool {
+    use std::io::Write;
+    if std::fs::read_link(path)
+        .map(|t| t.to_string_lossy().contains("(deleted)"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(mut f) => f.write(b"").is_err(),
+        Err(_) => true,
+    }
+}
+
+/// The TUI can never interact again once stdio's terminal is gone — and
+/// crossterm's poll busy-spins on the resulting EIO instead of returning.
+/// The watchdog (see run()) uses this to quit instead of spinning at ~100%
+/// CPU as an orphan.
+fn stdio_dead() -> bool {
+    path_dead("/proc/self/fd/0") || path_dead("/proc/self/fd/1")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn path_dead_classifies_fds() {
+        // Healthy character device: usable.
+        assert!(!path_dead("/dev/null"));
+        // Missing path: unusable.
+        assert!(path_dead("/proc/self/fd/99999"));
+        // Unlinked path: unusable (same signal as a torn-down pty).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x");
+        std::fs::write(&p, "x").unwrap();
+        let _held = std::fs::File::open(&p).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        assert!(path_dead(p.to_str().unwrap()));
+        // Our own stdio in the test harness is never dead.
+        assert!(!stdio_dead());
+    }
 
     #[test]
     fn trigger_search_is_non_blocking() {
