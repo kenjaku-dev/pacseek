@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pacseek — AUR + official repo search with a TUI, for Arch &amp; Artix</title>
+<meta name="description" content="pacseek: fast AUR + official repo search with TUI install/remove for Arch / Artix. One Rust binary, ratatui + libalpm." />
+<meta name="theme-color" content="#07090d" />
+<meta property="og:title" content="pacseek — search pacman + AUR in one keystroke" />
+<meta property="og:description" content="Fast AUR + official repo search with TUI install/remove for Arch / Artix — Rust + ratatui." />
+<meta property="og:image" content="https://opengraph.githubassets.com/1/kenjaku-dev/pacseek" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%231793d1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230b1220'/%3E%3Ccircle cx='28' cy='28' r='14' fill='none' stroke='url(%23g)' stroke-width='6'/%3E%3Cpath d='M38 38l12 12' stroke='url(%23g)' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#07090d; --bg-2:#0b0f16; --bg-3:#0f1520;
+    --card:rgba(255,255,255,.028); --card-hi:rgba(255,255,255,.05);
+    --line:rgba(255,255,255,.08); --line-hi:rgba(255,255,255,.16);
+    --text:#e6edf3; --muted:#8b98a9; --dim:#5b6676;
+    --arch:#1793d1; --cyan:#22d3ee; --magenta:#e879f9; --green:#4ade80;
+    --red:#f87171; --blue:#60a5fa; --yellow:#facc15; --rust:#f97316;
+    --term:#0a0e14;
+    --radius:16px;
+    --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  code,kbd,pre{font-family:var(--mono)}
+  ::selection{background:rgba(34,211,238,.3)}
+
+  /* ---------- background ---------- */
+  .bg{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+  .bg::before{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:56px 56px;opacity:.35;
+    mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 75%);
+    -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 75%)}
+  .glow{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5}
+  .glow.a{width:620px;height:620px;left:50%;top:-260px;transform:translateX(-60%);background:radial-gradient(circle,#1793d1 0%,transparent 65%)}
+  .glow.b{width:480px;height:480px;right:-120px;top:120px;background:radial-gradient(circle,#a21caf 0%,transparent 65%);opacity:.28}
+  .glow.c{width:420px;height:420px;left:-140px;top:520px;background:radial-gradient(circle,#0891b2 0%,transparent 65%);opacity:.25}
+
+  .wrap{width:min(1160px,100% - 40px);margin-inline:auto}
+
+  /* ---------- nav ---------- */
+  header.nav{position:sticky;top:0;z-index:50;backdrop-filter:saturate(160%) blur(14px);-webkit-backdrop-filter:saturate(160%) blur(14px);
+    background:rgba(7,9,13,.6);border-bottom:1px solid transparent;transition:border-color .3s,background .3s}
+  header.nav.scrolled{border-bottom-color:var(--line);background:rgba(7,9,13,.82)}
+  .nav-in{display:flex;align-items:center;gap:28px;height:64px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.02em;font-size:18px}
+  .brand svg{width:28px;height:28px}
+  .brand .v{font:500 11px var(--mono);color:var(--muted);border:1px solid var(--line);padding:2px 7px;border-radius:99px}
+  .nav-links{display:flex;gap:22px;margin-left:8px}
+  .nav-links a{color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
+  .nav-links a:hover{color:var(--text)}
+  .nav-cta{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .gh{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line-hi);border-radius:10px;font-size:14px;font-weight:500;background:var(--card);transition:background .2s,border-color .2s}
+  .gh:hover{background:var(--card-hi);border-color:rgba(255,255,255,.28)}
+  .gh svg{width:17px;height:17px}
+  .gh .stars{display:none;align-items:center;gap:4px;padding-left:8px;margin-left:2px;border-left:1px solid var(--line-hi);color:var(--muted);font-family:var(--mono);font-size:12px}
+  .gh.has .stars{display:inline-flex}
+  @media (max-width:820px){.nav-links{display:none}}
+
+  /* ---------- buttons ---------- */
+  .btn{display:inline-flex;align-items:center;gap:10px;height:46px;padding:0 20px;border-radius:12px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer;transition:transform .15s,box-shadow .2s,background .2s,border-color .2s}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:linear-gradient(180deg,#2bb3f0,#1793d1);color:#04121c;box-shadow:0 8px 30px -8px rgba(23,147,209,.7),inset 0 1px 0 rgba(255,255,255,.35)}
+  .btn-primary:hover{box-shadow:0 10px 40px -6px rgba(23,147,209,.9),inset 0 1px 0 rgba(255,255,255,.35)}
+  .btn-ghost{background:var(--card);border-color:var(--line-hi);color:var(--text)}
+  .btn-ghost:hover{background:var(--card-hi)}
+  .btn svg{width:18px;height:18px}
+
+  /* ---------- hero ---------- */
+  .hero{padding:84px 0 40px;text-align:center}
+  .pill{display:inline-flex;align-items:center;gap:10px;padding:6px 14px 6px 6px;border-radius:99px;border:1px solid var(--line-hi);background:rgba(255,255,255,.03);font-size:13px;color:var(--muted);transition:border-color .2s}
+  .pill:hover{border-color:rgba(34,211,238,.5)}
+  .pill b{font:600 11px var(--mono);color:#04121c;background:var(--cyan);padding:3px 8px;border-radius:99px}
+  h1{font-size:clamp(2.5rem,6.4vw,5.1rem);line-height:1.02;letter-spacing:-.045em;margin:26px auto 22px;font-weight:800;max-width:15ch}
+  .grad{background:linear-gradient(100deg,#fff 0%,#bdf3ff 35%,#22d3ee 60%,#1793d1 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:clamp(1.05rem,1.6vw,1.22rem);color:var(--muted);max-width:640px;margin:0 auto 34px}
+  .lede code{color:var(--text);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:6px;font-size:.88em}
+  .hero-ctas{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .oneliner{margin:28px auto 0;display:flex;align-items:center;gap:12px;max-width:640px;width:100%;padding:8px 8px 8px 18px;border:1px solid var(--line-hi);border-radius:14px;background:rgba(10,14,20,.8);font:500 14px var(--mono);text-align:left}
+  .oneliner .p{color:var(--cyan);user-select:none}
+  .oneliner .cmd{flex:1;overflow-x:auto;white-space:nowrap;scrollbar-width:none;color:#cfe3f0}
+  .oneliner .cmd::-webkit-scrollbar{display:none}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+  .badge{font:500 12px var(--mono);color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.02);display:inline-flex;gap:6px;align-items:center}
+  .badge i{width:7px;height:7px;border-radius:50%;display:inline-block}
+
+  /* ---------- copy button ---------- */
+  .copy{flex:none;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line-hi);background:rgba(255,255,255,.04);color:var(--muted);font:500 12px var(--sans);cursor:pointer;transition:all .2s}
+  .copy:hover{color:var(--text);background:rgba(255,255,255,.08)}
+  .copy.ok{color:var(--green);border-color:rgba(74,222,128,.4)}
+  .copy svg{width:14px;height:14px}
+
+  /* ---------- terminal demo ---------- */
+  .demo{padding:38px 0 30px;position:relative}
+  .term-wrap{position:relative;max-width:900px;margin:0 auto}
+  .term-wrap::before{content:"";position:absolute;inset:-1px;border-radius:18px;padding:1px;
+    background:linear-gradient(140deg,rgba(34,211,238,.6),rgba(255,255,255,.06) 35%,rgba(255,255,255,.04) 65%,rgba(232,121,249,.5));
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+  .term-wrap::after{content:"";position:absolute;inset:40px 6% -40px;background:radial-gradient(ellipse at center,rgba(23,147,209,.35),transparent 70%);filter:blur(40px);z-index:-1}
+  .term{background:var(--term);border-radius:18px;overflow:hidden;box-shadow:0 40px 120px -30px rgba(0,0,0,.9);outline:none;text-align:left}
+  .term:focus-visible{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 40px 120px -30px rgba(0,0,0,.9)}
+  .term-bar{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+  .dot{width:12px;height:12px;border-radius:50%;background:#2a313c}
+  .dot:nth-child(1){background:#ff5f57}.dot:nth-child(2){background:#febc2e}.dot:nth-child(3){background:#28c840}
+  .term-title{flex:1;text-align:center;font:500 12px var(--mono);color:var(--dim);margin-right:44px}
+  .live{font:600 10.5px var(--mono);letter-spacing:.06em;color:var(--green);display:inline-flex;align-items:center;gap:6px;text-transform:uppercase}
+  .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 1.6s infinite}
+  .live.auto{color:var(--yellow)}.live.auto::before{background:var(--yellow);box-shadow:0 0 10px var(--yellow)}
+  @keyframes pulse{50%{opacity:.35}}
+
+  .screen{position:relative;padding:14px 16px 12px;font:13.5px/1.55 var(--mono);color:#d7dee7;height:470px;display:flex;flex-direction:column;gap:10px;user-select:none}
+  .tabs-line{white-space:pre;color:var(--dim)}
+  .tabs-line span{padding:1px 6px;border-radius:3px;cursor:pointer}
+  .tabs-line span.on{background:var(--cyan);color:#000;font-weight:700}
+  .tbox{position:relative;border:1px solid #3a4352;border-radius:8px;padding:9px 12px 8px}
+  .tbox.focus{border-color:var(--cyan)}
+  .tbox .ttl{position:absolute;top:-.78em;left:10px;background:var(--term);padding:0 6px;color:#aab4c2;font-size:12.5px;white-space:nowrap;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis}
+  .tbox.focus .ttl{color:var(--cyan)}
+  .qline{white-space:pre;overflow:hidden;cursor:text}
+  .qline .ph{color:var(--dim)}
+  .cur{display:inline-block;width:.6em;background:#d7dee7;animation:blink 1s steps(1) infinite;color:transparent}
+  @keyframes blink{50%{opacity:0}}
+  .results{flex:1;min-height:0;overflow:hidden}
+  .row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px;border-radius:3px;cursor:pointer}
+  .row .desc{display:block;color:#7f8a99;padding-left:2.1em;overflow:hidden;text-overflow:ellipsis}
+  .row.sel{background:#262d38}
+  .row.sel .name{color:#fff}
+  .row .sym{color:var(--cyan);display:inline-block;width:1.4em}
+  .r-core{color:var(--red);font-weight:700}.r-extra{color:var(--green);font-weight:700}
+  .r-multilib{color:var(--blue);font-weight:700}.r-aur{color:var(--magenta);font-weight:700}.r-local{color:var(--green);font-weight:700}
+  .name{font-weight:700}
+  .name u{text-decoration:none;color:var(--cyan)}
+  .ver{color:#d7dee7}
+  .inst{color:var(--green);font-weight:700}
+  .votes{color:var(--yellow)}
+  .empty{color:var(--dim);padding:6px 4px}
+  .status{display:flex;justify-content:space-between;gap:12px;white-space:nowrap;color:#9aa5b4;font-size:12.5px;padding:0 2px}
+  .status .l{overflow:hidden;text-overflow:ellipsis}
+  .status .spin{color:var(--cyan)}
+  .status .r{color:var(--dim)}
+
+  .popup-layer{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,7,10,.55)}
+  .popup-layer.show{display:flex}
+  .popup{position:relative;width:min(560px,92%);background:#000;border:1px solid var(--yellow);border-radius:8px;padding:16px 16px 12px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:pop .14s ease-out}
+  @keyframes pop{from{transform:scale(.97);opacity:0}}
+  .popup .ttl{position:absolute;top:-.78em;left:10px;background:#000;padding:0 6px;color:var(--yellow);font-weight:700;font-size:12.5px}
+  .popup .kv{display:grid;grid-template-columns:9.5em 1fr;gap:1px 10px}
+  .popup .kv span:nth-child(odd){color:#8b98a9}
+  .popup .cmd{color:var(--cyan)}
+  .popup .foot{margin-top:12px;color:var(--dim);font-size:12px}
+  .popup .foot b{color:var(--text)}
+  .popup .ok{color:var(--green)}
+  .popup .warn{color:var(--yellow)}
+  .popup pre{margin:0;font:inherit;white-space:pre-wrap}
+
+  .keys-bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:18px;align-items:center}
+  .keys-bar .hint{color:var(--muted);font-size:13px;margin-right:4px}
+  .chip{font:500 12px var(--mono);color:var(--text);background:linear-gradient(180deg,#1a212c,#121821);border:1px solid #2b3442;border-bottom-width:2px;border-radius:7px;padding:4px 10px;cursor:pointer;transition:transform .08s,border-color .2s}
+  .chip:hover{border-color:var(--cyan)}
+  .chip:active{transform:translateY(1px)}
+
+  @media (max-width:640px){
+    .screen{font-size:11px;height:420px;padding:12px 10px}
+    .tbox .ttl,.status{font-size:10.5px}
+    .status .r{display:none}
+  }
+
+  /* ---------- sections ---------- */
+  section{padding:96px 0}
+  .eyebrow{font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);display:inline-flex;align-items:center;gap:8px}
+  .eyebrow::before{content:"";width:18px;height:1px;background:currentColor}
+  h2{font-size:clamp(2rem,4vw,3rem);letter-spacing:-.035em;line-height:1.08;margin:14px 0 16px;font-weight:800}
+  .sub{color:var(--muted);font-size:1.08rem;max-width:620px;margin:0}
+  .head{margin-bottom:52px}
+  .head.center{text-align:center}.head.center .sub{margin-inline:auto}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--radius);background:var(--card);overflow:hidden;margin-top:60px}
+  .stat{padding:26px 24px;border-right:1px solid var(--line)}
+  .stat:last-child{border-right:0}
+  .stat .n{font-size:30px;font-weight:800;letter-spacing:-.03em}
+  .stat .n small{font-size:16px;color:var(--muted);font-weight:600;margin-left:2px}
+  .stat .t{color:var(--muted);font-size:14px}
+  .stat .t code{font-size:12px;color:#cfe3f0}
+  @media (max-width:820px){.stats{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+
+  /* features */
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  @media (max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:560px){.grid{grid-template-columns:1fr}}
+  .card{position:relative;padding:24px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);overflow:hidden;transition:border-color .25s,transform .25s,background .25s}
+  .card::before{content:"";position:absolute;inset:0;background:radial-gradient(400px circle at var(--mx,50%) var(--my,0%),rgba(34,211,238,.10),transparent 45%);opacity:0;transition:opacity .3s;pointer-events:none}
+  .card:hover{border-color:var(--line-hi);transform:translateY(-2px)}
+  .card:hover::before{opacity:1}
+  .card.span2{grid-column:span 2}
+  @media (max-width:560px){.card.span2{grid-column:auto}}
+  .ico{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;margin-bottom:18px;border:1px solid var(--line-hi);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.01))}
+  .ico svg{width:20px;height:20px}
+  .card h3{margin:0 0 8px;font-size:17px;letter-spacing:-.015em}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .card code{font-size:12.5px;color:#cfe3f0;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px}
+  .mini{margin-top:18px;font:12.5px/1.7 var(--mono);background:var(--term);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:#cdd6e0;overflow-x:auto;white-space:pre}
+
+  /* flow */
+  .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;position:relative;margin-top:10px}
+  .flow::before{content:"";position:absolute;top:27px;left:12%;right:12%;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),var(--magenta),transparent);opacity:.5}
+  .step{text-align:center;padding:0 14px;position:relative}
+  .step .num{width:54px;height:54px;margin:0 auto 18px;border-radius:50%;display:grid;place-items:center;background:var(--bg-2);border:1px solid var(--line-hi);font:700 15px var(--mono);color:var(--cyan);position:relative;z-index:1;box-shadow:0 0 0 6px var(--bg)}
+  .step h4{margin:0 0 6px;font-size:16px}
+  .step p{margin:0;color:var(--muted);font-size:14px}
+  .step code{font-size:12px;color:#cfe3f0}
+  @media (max-width:820px){.flow{grid-template-columns:1fr 1fr;row-gap:36px}.flow::before{display:none}}
+
+  /* modes */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:900px){.split{grid-template-columns:1fr}}
+  .mode{padding:28px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card)}
+  .mode .tag{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:4px 9px;border-radius:6px;display:inline-block;margin-bottom:14px}
+  .mode.s .tag{color:var(--cyan);background:rgba(34,211,238,.1)}
+  .mode.r .tag{color:var(--red);background:rgba(248,113,113,.1)}
+  .mode h3{margin:0 0 8px;font-size:22px;letter-spacing:-.02em}
+  .mode p{color:var(--muted);margin:0 0 18px}
+  .mode ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+  .mode li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;color:#c9d2dd}
+  .mode li::before{content:"›";color:var(--cyan);font-family:var(--mono);font-weight:700}
+  .mode.r li::before{color:var(--red)}
+  .mode li code{font-size:12.5px;color:#cfe3f0;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px}
+
+  /* keybindings */
+  .keys{display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:10px 28px}
+  @media (max-width:760px){.keys{grid-template-columns:1fr}}
+  .krow{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px dashed var(--line)}
+  .krow:nth-last-child(-n+2){border-bottom:0}
+  @media (max-width:760px){.krow:nth-last-child(2){border-bottom:1px dashed var(--line)}}
+  .krow span{color:#c9d2dd;font-size:14.5px}
+  .krow .ks{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+  kbd{font:600 12px var(--mono);min-width:26px;text-align:center;padding:3px 8px;border-radius:6px;background:linear-gradient(180deg,#1c2430,#141a23);border:1px solid #2d3746;border-bottom-width:2px;color:var(--text)}
+
+  /* code tabs */
+  .tabs{display:flex;gap:4px;padding:5px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:max-content;max-width:100%;overflow-x:auto;margin-bottom:16px;scrollbar-width:none}
+  .tabs button{font:500 13.5px var(--sans);color:var(--muted);background:none;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:all .2s}
+  .tabs button:hover{color:var(--text)}
+  .tabs button.on{background:rgba(255,255,255,.08);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-hi)}
+  .panel{display:none}.panel.on{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}}
+  .code{position:relative;border:1px solid var(--line);border-radius:var(--radius);background:var(--term);overflow:hidden}
+  .code-head{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 8px 16px;border-bottom:1px solid var(--line);font:500 12px var(--mono);color:var(--dim)}
+  .code pre{margin:0;padding:18px 20px;overflow-x:auto;font-size:13.5px;line-height:1.75;color:#cdd6e0}
+  .c-p{color:var(--cyan);user-select:none}.c-c{color:#5b6676;font-style:italic}.c-f{color:var(--yellow)}
+  .c-s{color:#a5e8a0}.c-k{color:#7dd3fc}.c-n{color:#fca5a5}.c-h{color:var(--magenta);font-weight:700}
+  .c-b{color:#c4b5fd}.c-o{color:#7f8a99}
+
+  .two{display:grid;grid-template-columns:1fr 1.1fr;gap:48px;align-items:center}
+  @media (max-width:900px){.two{grid-template-columns:1fr;gap:32px}}
+  .checks{list-style:none;padding:0;margin:26px 0 0;display:grid;gap:14px}
+  .checks li{display:flex;gap:12px;color:#c9d2dd}
+  .checks li svg{flex:none;width:20px;height:20px;margin-top:2px;color:var(--green)}
+  .checks code{font-size:12.5px;color:#cfe3f0;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px}
+
+  /* install */
+  .deps{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .deps span{font:500 12.5px var(--mono);padding:5px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:#c9d2dd}
+
+  /* cta */
+  .cta{position:relative;text-align:center;padding:70px 30px;border-radius:24px;border:1px solid var(--line-hi);overflow:hidden;
+    background:radial-gradient(ellipse at top,rgba(23,147,209,.25),transparent 60%),radial-gradient(ellipse at bottom right,rgba(162,28,175,.18),transparent 55%),var(--bg-2)}
+  .cta h2{max-width:18ch;margin-inline:auto}
+  .cta .sub{margin:0 auto 30px}
+
+  footer{border-top:1px solid var(--line);padding:36px 0 50px;color:var(--muted);font-size:14px}
+  .foot-in{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  .foot-in nav{display:flex;gap:20px}
+  .foot-in a:hover{color:var(--text)}
+
+  /* reveal */
+  .js .reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+  .js .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .js .reveal{opacity:1;transform:none;transition:none}
+    .cur,.live::before{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"><div class="glow a"></div><div class="glow b"></div><div class="glow c"></div></div>
+
+<!-- ================= NAV ================= -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="pacseek home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#1793d1"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="#0b1220" stroke="rgba(255,255,255,.12)"/><circle cx="28" cy="28" r="13" fill="none" stroke="url(#lg)" stroke-width="6"/><path d="M38 38l12 12" stroke="url(#lg)" stroke-width="7" stroke-linecap="round"/><path d="M28 21l6 12h-12z" fill="#22d3ee" opacity=".85"/></svg>
+      pacseek <span class="v">v0.4.1</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#demo">Demo</a>
+      <a href="#features">Features</a>
+      <a href="#keys">Keys</a>
+      <a href="#usage">CLI</a>
+      <a href="#install">Install</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="gh" id="gh" href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        GitHub
+        <span class="stars"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.31l-3.75 1.98a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg><b id="starCount">0</b></span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="wrap">
+    <a class="pill reveal" href="https://github.com/kenjaku-dev/pacseek/releases" target="_blank" rel="noopener"><b>NEW</b> v0.4.1 — remover mode, refresh &amp; TOML theming →</a>
+    <h1 class="reveal"><span class="grad">pacman + AUR.</span><br/>One search bar.</h1>
+    <p class="lede reveal">Fast <strong>official repo + AUR</strong> search with a real terminal UI to install and remove packages on <strong>Arch</strong> &amp; <strong>Artix</strong>. One Rust binary for both <code>pacman -Ss</code> and AUR <code>RPC v5</code>.</p>
+    <div class="hero-ctas reveal">
+      <a class="btn btn-primary" href="#install">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
+        Install pacseek
+      </a>
+      <a class="btn btn-ghost" href="#demo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5M12 19h8"/></svg>
+        Try the live demo
+      </a>
+    </div>
+    <div class="oneliner reveal">
+      <span class="p">$</span>
+      <span class="cmd" id="oneliner">git clone https://github.com/kenjaku-dev/pacseek &amp;&amp; cd pacseek &amp;&amp; ./install.sh</span>
+      <button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek && cd pacseek && ./install.sh" aria-label="Copy install command">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span>
+      </button>
+    </div>
+    <div class="badges reveal">
+      <span class="badge"><i style="background:var(--rust)"></i>Rust 2024</span>
+      <span class="badge"><i style="background:var(--cyan)"></i>ratatui 0.30</span>
+      <span class="badge"><i style="background:var(--arch)"></i>libalpm</span>
+      <span class="badge"><i style="background:var(--magenta)"></i>AUR RPC v5</span>
+      <span class="badge"><i style="background:var(--green)"></i>MIT</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DEMO ================= -->
+<div class="demo" id="demo">
+  <div class="wrap">
+    <div class="term-wrap reveal">
+      <div class="term" id="term" tabindex="0" role="application" aria-label="Interactive pacseek TUI demo. Type to search, arrows to move, Enter to install, i for info, Tab to switch modes, ? for help.">
+        <div class="term-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="term-title">~ — pacseek --tui</span>
+          <span class="live auto" id="liveTag">autoplay</span>
+        </div>
+        <div class="screen" id="screen">
+          <div class="tabs-line" id="tabsLine"></div>
+          <div class="tbox focus" id="qbox"><span class="ttl" id="qttl"></span><div class="qline" id="qline"></div></div>
+          <div class="tbox results" id="rbox"><span class="ttl" id="rttl"></span><div id="rows"></div></div>
+          <div class="status"><span class="l" id="statusL"></span><span class="r" id="statusR">Tab:mode  ?:help  q:quit</span></div>
+          <div class="popup-layer" id="popLayer"><div class="popup" id="popup"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="keys-bar reveal">
+      <span class="hint">Click the terminal &amp; type — or tap:</span>
+      <button class="chip" data-key="Tab">Tab</button>
+      <button class="chip" data-key="ArrowUp">↑</button>
+      <button class="chip" data-key="ArrowDown">↓</button>
+      <button class="chip" data-key="Enter">Enter</button>
+      <button class="chip" data-key="i">i</button>
+      <button class="chip" data-key="?">?</button>
+      <button class="chip" data-key="F5">F5</button>
+      <button class="chip" data-key="Escape">Esc</button>
+    </div>
+
+    <div class="stats reveal">
+      <div class="stat"><div class="n">2<small>→1</small></div><div class="t">sources, one binary</div></div>
+      <div class="stat"><div class="n">5.1<small>MB</small></div><div class="t">stripped, <code>opt-level=z</code> + LTO</div></div>
+      <div class="stat"><div class="n">∥</div><div class="t">repo &amp; AUR queried in parallel</div></div>
+      <div class="stat"><div class="n">0</div><div class="t">times <code>makepkg</code> runs as root</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Features</span>
+      <h2>Everything you reach for.<br/>Nothing you don't.</h2>
+      <p class="sub">Built on <code>ratatui</code>, <code>tokio</code> and <code>libalpm</code>, so it feels native to your terminal and stays out of the way.</p>
+    </div>
+
+    <div class="grid">
+      <div class="card span2 reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+        <h3>One search, both worlds</h3>
+        <p>Official repos via the local <code>libalpm</code> sync DB and the AUR via RPC v5, queried in parallel with <code>tokio</code>. Repo results come first, AUR after. Falls back to <code>pacman -Ss</code> when needed.</p>
+        <div class="mini"><span class="c-p">$</span> pacseek firefox
+<span class="r-extra">extra/</span><b>firefox</b> 131.0-1 <span class="inst">[installed]</span>
+<span class="r-aur">aur/</span><b>firefox-bin</b> 131.0-1 <span class="votes">(+1200 5.2)</span></div>
+      </div>
+      <div class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#e879f9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h8"/></svg></div>
+        <h3>A real TUI</h3>
+        <p>Tabs, a virtualized list, info and help popups, and a cached layout. Runs in an alternate screen and restores your terminal cleanly, even after a panic.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></svg></div>
+        <h3>Install on Enter</h3>
+        <p>Repo packages go through <code>sudo pacman -S</code>. AUR packages go through <code>git clone</code> + <code>makepkg -si</code>, with a PKGBUILD preview and <code>namcap</code> if it's installed.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></div>
+        <h3>Remover mode</h3>
+        <p>Hit <code>Tab</code> to list installed packages and type to filter. You get a <code>pacman -Qi</code> preview before <code>sudo pacman -Rs</code> runs.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg></div>
+        <h3>Script-friendly</h3>
+        <p>Use <code>--json</code>, <code>--no-tui</code> or <code>--no-color</code>, and <code>NO_COLOR</code> is respected. <code>--remove</code> and <code>--refresh</code> work as one-shots, and <code>PACSEEK_NOCONFIRM=1</code> skips the prompts.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></div>
+        <h3>TOML config</h3>
+        <p>Change colors, borders, layout and timeouts in <code>config.toml</code> without recompiling. Drop a <code>./pacseek.toml</code> in a folder for project-local settings.</p>
+      </div>
+      <div class="card span2 reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Safe by default</h3>
+        <p>Sources are fetched over HTTPS only. <code>makepkg</code> refuses to run as root (checked via <code>nix::geteuid</code>), the PKGBUILD is always shown, and a <code>color_eyre</code> panic hook is installed before the TUI starts so a crash never leaves your shell broken.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section style="padding-top:20px">
+  <div class="wrap">
+    <div class="head center reveal">
+      <span class="eyebrow">How it works</span>
+      <h2>From keystroke to installed</h2>
+    </div>
+    <div class="flow">
+      <div class="step reveal"><div class="num">01</div><h4>Type</h4><p>Your query is debounced and sent as you type: substring by default, <code>--regex</code> if you want it.</p></div>
+      <div class="step reveal"><div class="num">02</div><h4>Query in parallel</h4><p><code>libalpm</code> sync DBs and the AUR RPC v5 are queried at the same time on <code>tokio</code>.</p></div>
+      <div class="step reveal"><div class="num">03</div><h4>Merge &amp; rank</h4><p>Results are merged into one list, repos first, with installed, out-of-date, votes and popularity flags.</p></div>
+      <div class="step reveal"><div class="num">04</div><h4>Enter</h4><p>Confirm, and <code>pacman -S</code> or <code>makepkg -si</code> runs. You're back in the list right after.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MODES ================= -->
+<section style="padding-top:40px">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Two modes, one Tab</span>
+      <h2>Find it. Install it. Remove it.</h2>
+    </div>
+    <div class="split">
+      <div class="mode s reveal">
+        <span class="tag">🔍 Search · install</span>
+        <h3>Search mode</h3>
+        <p>Every package in core, extra, multilib and the AUR, behind one search bar.</p>
+        <ul>
+          <li>Color-coded sources: <code>core</code> <code>extra</code> <code>multilib</code> <code>aur</code></li>
+          <li>AUR votes and popularity inline, like <code>(+1200 5.2)</code></li>
+          <li><code>i</code> opens an info popup with version, URL, maintainer and status</li>
+          <li><code>Enter</code> → confirm → install, then straight back to the list</li>
+        </ul>
+      </div>
+      <div class="mode r reveal">
+        <span class="tag">🗑 Installed · remove</span>
+        <h3>Remover mode</h3>
+        <p>Clean up your system without remembering exact package names.</p>
+        <ul>
+          <li>An empty filter lists every installed package; type to narrow it down</li>
+          <li><code>Enter</code> / <code>d</code> / <code>x</code> → confirm popup with a <code>pacman -Qi</code> preview</li>
+          <li>Runs <code>sudo pacman -Rs</code>, so orphaned deps go too</li>
+          <li><code>pacseek --remove &lt;pkg&gt;</code> does the same from scripts</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= KEYS ================= -->
+<section id="keys" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Keybindings</span>
+      <h2>Keyboard-first, always</h2>
+      <p class="sub">Press <kbd>?</kbd> in the TUI to bring these up at any time.</p>
+    </div>
+    <div class="keys reveal">
+      <div class="krow"><span>Switch Search ↔ Installed</span><div class="ks"><kbd>Tab</kbd><kbd>⇧ Tab</kbd></div></div>
+      <div class="krow"><span>Navigate results</span><div class="ks"><kbd>↑</kbd><kbd>↓</kbd><kbd>j</kbd><kbd>k</kbd></div></div>
+      <div class="krow"><span>Search / install / remove</span><div class="ks"><kbd>Enter</kbd></div></div>
+      <div class="krow"><span>Package info</span><div class="ks"><kbd>i</kbd></div></div>
+      <div class="krow"><span>Remove (Installed mode)</span><div class="ks"><kbd>d</kbd><kbd>x</kbd><kbd>Del</kbd></div></div>
+      <div class="krow"><span>Refresh sync DB</span><div class="ks"><kbd>F5</kbd><kbd>Ctrl R</kbd><kbd>r</kbd></div></div>
+      <div class="krow"><span>Focus search bar</span><div class="ks"><kbd>/</kbd></div></div>
+      <div class="krow"><span>Help popup</span><div class="ks"><kbd>?</kbd></div></div>
+      <div class="krow"><span>Confirm / cancel</span><div class="ks"><kbd>y</kbd><kbd>n</kbd></div></div>
+      <div class="krow"><span>Close popup / quit</span><div class="ks"><kbd>Esc</kbd><kbd>q</kbd></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CLI ================= -->
+<section id="usage" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">CLI</span>
+      <h2>Prefer one-shots? Skip the TUI.</h2>
+      <p class="sub">Run <code>pacseek &lt;query&gt;</code> for plain output you can pipe, filter and script. With no args on a TTY, the TUI opens.</p>
+    </div>
+    <div class="reveal">
+      <div class="tabs" data-group="usage" role="tablist">
+        <button class="on" data-tab="search">Search</button>
+        <button data-tab="json">JSON</button>
+        <button data-tab="filters">Filters</button>
+        <button data-tab="manage">Remove &amp; refresh</button>
+      </div>
+      <div class="panel on" data-group="usage" data-panel="search">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek firefox --limit 5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>pacseek firefox <span class="c-f">--limit</span> <span class="c-n">5</span>
+<span class="r-extra">extra/</span><b>firefox</b> 131.0-1 <span class="inst">[installed]</span>
+    <span class="c-o">Fast, Private &amp; Safe Web Browser</span>
+<span class="r-extra">extra/</span><b>firefox-developer-edition</b> 132.0b5-1
+    <span class="c-o">Firefox for developers</span>
+<span class="r-aur">aur/</span><b>firefox-bin</b> 131.0-1 <span class="votes">(+1200 5.20)</span>
+    <span class="c-o">Standalone web browser from mozilla.org</span>
+<span class="r-aur">aur/</span><b>firefox-nightly-bin</b> 133.0a1-1 <span class="votes">(+412 1.90)</span>
+    <span class="c-o">Nightly build of Firefox</span>
+
+<span class="c-c"># no args on a TTY → TUI</span>
+<span class="c-p">$ </span>pacseek
+<span class="c-p">$ </span>pacseek <span class="c-f">--tui</span></pre></div>
+      </div>
+      <div class="panel" data-group="usage" data-panel="json">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek neovim --json --limit 1 | jq '.[0]'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>pacseek neovim <span class="c-f">--json</span> <span class="c-f">--limit</span> <span class="c-n">1</span> | jq <span class="c-s">'.[0]'</span>
+{
+  <span class="c-k">"name"</span>: <span class="c-s">"neovim"</span>,
+  <span class="c-k">"version"</span>: <span class="c-s">"0.10.2-1"</span>,
+  <span class="c-k">"description"</span>: <span class="c-s">"Fork of Vim aiming to improve user experience, plugins, and GUIs"</span>,
+  <span class="c-k">"repo"</span>: <span class="c-s">"extra"</span>,
+  <span class="c-k">"arch"</span>: <span class="c-s">"x86_64"</span>,
+  <span class="c-k">"url"</span>: <span class="c-s">"https://neovim.io"</span>,
+  <span class="c-k">"installed"</span>: <span class="c-b">true</span>,
+  <span class="c-k">"votes"</span>: <span class="c-b">null</span>,
+  <span class="c-k">"popularity"</span>: <span class="c-b">null</span>,
+  <span class="c-k">"out_of_date"</span>: <span class="c-b">null</span>
+}</pre></div>
+      </div>
+      <div class="panel" data-group="usage" data-panel="filters">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy='pacseek yay --source aur --by name --limit 5'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-c"># AUR only, match by name</span>
+<span class="c-p">$ </span>pacseek yay <span class="c-f">--source</span> aur <span class="c-f">--by</span> name <span class="c-f">--limit</span> <span class="c-n">5</span>
+
+<span class="c-c"># regex (libalpm regex for repo, client-side for AUR)</span>
+<span class="c-p">$ </span>pacseek <span class="c-s">"linux.*headers"</span> <span class="c-f">--regex</span>
+
+<span class="c-c"># only what's already installed</span>
+<span class="c-p">$ </span>pacseek rust <span class="c-f">--installed-only</span>
+
+<span class="c-c"># AUR first, no colors, no TUI (great for pipes)</span>
+<span class="c-p">$ </span>pacseek python <span class="c-f">--bottom-up</span> <span class="c-f">--no-color</span> <span class="c-f">--no-tui</span>
+
+<span class="c-c"># --source  aur | repo | all     --by  name | name-desc | maintainer …</span></pre></div>
+      </div>
+      <div class="panel" data-group="usage" data-panel="manage">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek --remove htop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-c"># remove a package (asks to confirm on a TTY)</span>
+<span class="c-p">$ </span>pacseek <span class="c-f">--remove</span> htop
+
+<span class="c-c"># unattended: skip remove / makepkg / refresh prompts</span>
+<span class="c-p">$ </span><span class="c-k">PACSEEK_NOCONFIRM</span>=<span class="c-n">1</span> pacseek <span class="c-f">--remove</span> htop
+
+<span class="c-c"># refresh sync databases (sudo pacman -Sy)</span>
+<span class="c-p">$ </span>pacseek <span class="c-f">--refresh</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CONFIG ================= -->
+<section id="config" style="padding-top:40px">
+  <div class="wrap two">
+    <div class="reveal">
+      <span class="eyebrow">Config</span>
+      <h2>Make it yours.<br/>No recompile.</h2>
+      <p class="sub">Every field is optional, and changes apply the next time you launch. Generate a starter file, then tweak away.</p>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><code>pacseek --init-config</code> writes an example to <code>~/.config/pacseek/config.toml</code></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><code>--show-config</code> prints the active path, and <code>--config PATH</code> overrides it</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span>A <code>./pacseek.toml</code> in the current folder overrides the global config</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span>Themes, borders, popup sizes, debounce, timeouts, remove flags</span></li>
+      </ul>
+    </div>
+    <div class="code reveal">
+      <div class="code-head"><span>~/.config/pacseek/config.toml</span><button class="copy" data-copy="pacseek --init-config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy init</span></button></div>
+<pre><span class="c-h">[search]</span>
+<span class="c-k">limit</span>        = <span class="c-n">50</span>
+<span class="c-k">source</span>       = <span class="c-s">"all"</span>        <span class="c-c"># aur | repo | all</span>
+<span class="c-k">by</span>           = <span class="c-s">"name-desc"</span>
+<span class="c-k">timeout_secs</span> = <span class="c-n">15</span>
+
+<span class="c-h">[tui]</span>
+<span class="c-k">border</span>           = <span class="c-s">"rounded"</span>
+<span class="c-k">highlight_symbol</span> = <span class="c-s">"▸ "</span>
+<span class="c-k">debounce_ms</span>      = <span class="c-n">400</span>
+
+<span class="c-h">[theme]</span>
+<span class="c-k">border_focused</span> = <span class="c-s">"cyan"</span>
+<span class="c-k">repo_core</span>      = <span class="c-s">"red bold"</span>
+<span class="c-k">repo_extra</span>     = <span class="c-s">"green bold"</span>
+<span class="c-k">repo_aur</span>       = <span class="c-s">"magenta bold"</span>
+<span class="c-k">tab_selected</span>   = <span class="c-s">"black on cyan bold"</span>
+
+<span class="c-h">[behavior]</span>
+<span class="c-k">remove_flags</span>      = <span class="c-s">"Rs"</span>
+<span class="c-k">makepkg_noconfirm</span> = <span class="c-b">false</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= INSTALL ================= -->
+<section id="install" style="padding-top:40px">
+  <div class="wrap two" style="align-items:start">
+    <div class="reveal">
+      <span class="eyebrow">Install</span>
+      <h2>Up and running<br/>in under a minute.</h2>
+      <p class="sub"><code>install.sh</code> checks dependencies, builds a release binary and installs it to <code>/usr/local/bin</code>. Use <code>--user</code> to skip sudo.</p>
+      <div class="deps">
+        <span>pacman 5.1+ (libalpm 16)</span>
+        <span>pacman-contrib</span>
+        <span>git</span>
+        <span>base-devel</span>
+        <span>rust 1.88+</span>
+      </div>
+    </div>
+    <div class="reveal">
+      <div class="tabs" data-group="install" role="tablist">
+        <button class="on" data-tab="auto">install.sh</button>
+        <button data-tab="user">No sudo</button>
+        <button data-tab="cargo">cargo</button>
+        <button data-tab="manual">Manual</button>
+      </div>
+      <div class="panel on" data-group="install" data-panel="auto">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
+cd pacseek
+./install.sh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
+<span class="c-p">$ </span>cd pacseek
+<span class="c-p">$ </span>./install.sh            <span class="c-c"># deps + release build + /usr/local/bin</span>
+<span class="c-p">$ </span>./install.sh <span class="c-f">--help</span>     <span class="c-c"># --prefix / --yes / --no-sync</span></pre></div>
+      </div>
+      <div class="panel" data-group="install" data-panel="user">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
+cd pacseek
+./install.sh --user"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
+<span class="c-p">$ </span>cd pacseek
+<span class="c-p">$ </span>./install.sh <span class="c-f">--user</span>     <span class="c-c"># → ~/.cargo/bin (make sure it's on PATH)</span></pre></div>
+      </div>
+      <div class="panel" data-group="install" data-panel="cargo">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
+cd pacseek
+cargo install --path . --force"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
+<span class="c-p">$ </span>cd pacseek
+<span class="c-p">$ </span>cargo install <span class="c-f">--path</span> . <span class="c-f">--force</span>   <span class="c-c"># or: make install</span></pre></div>
+      </div>
+      <div class="panel" data-group="install" data-panel="manual">
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
+cd pacseek
+cargo build --release
+sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek
+sudo pacman -Sy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
+<span class="c-p">$ </span>cd pacseek
+<span class="c-p">$ </span>cargo build <span class="c-f">--release</span>      <span class="c-c"># ~5.1M stripped</span>
+<span class="c-p">$ </span>sudo install <span class="c-f">-Dm755</span> target/release/pacseek /usr/local/bin/pacseek
+<span class="c-p">$ </span>sudo pacman <span class="c-f">-Sy</span>            <span class="c-c"># sync DB before first repo search</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section style="padding-top:30px">
+  <div class="wrap">
+    <div class="cta reveal">
+      <span class="eyebrow">Ready?</span>
+      <h2>Stop juggling <span class="grad">pacman -Ss</span> and the AUR website.</h2>
+      <p class="sub">One binary, one search bar, one keystroke to install. Free and open source under the MIT license.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#install">Get pacseek</a>
+        <a class="btn btn-ghost" href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <div>© 2026 achraf · MIT License · Built with Rust + ratatui. Not affiliated with Arch Linux or Artix.</div>
+    <nav>
+      <a href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/kenjaku-dev/pacseek/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/kenjaku-dev/pacseek/releases" target="_blank" rel="noopener">Releases</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.add('js');
+
+/* ---------- nav shadow ---------- */
+(() => {
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', scrollY > 8);
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+})();
+
+/* ---------- reveal on scroll ---------- */
+(() => {
+  const els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)) { els.forEach(e => e.classList.add('in')); return; }
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(en => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+  els.forEach((e, i) => { e.style.transitionDelay = (i % 4) * 60 + 'ms'; io.observe(e); });
+})();
+
+/* ---------- card spotlight ---------- */
+document.querySelectorAll('.card').forEach(c => c.addEventListener('pointermove', e => {
+  const r = c.getBoundingClientRect();
+  c.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+  c.style.setProperty('--my', (e.clientY - r.top) + 'px');
+}));
+
+/* ---------- copy buttons ---------- */
+document.querySelectorAll('.copy').forEach(btn => btn.addEventListener('click', async () => {
+  const text = btn.dataset.copy;
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  const label = btn.querySelector('span'); const prev = label.textContent;
+  btn.classList.add('ok'); label.textContent = 'Copied';
+  setTimeout(() => { btn.classList.remove('ok'); label.textContent = prev; }, 1500);
+}));
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tabs').forEach(tabs => {
+  const group = tabs.dataset.group;
+  tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    tabs.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll(`.panel[data-group="${group}"]`).forEach(p => p.classList.toggle('on', p.dataset.panel === b.dataset.tab));
+  }));
+});
+
+/* ---------- GitHub stars ---------- */
+fetch('https://api.github.com/repos/kenjaku-dev/pacseek')
+  .then(r => r.ok ? r.json() : null)
+  .then(j => {
+    if (!j || typeof j.stargazers_count !== 'number') return;
+    const n = j.stargazers_count;
+    document.getElementById('starCount').textContent = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : n;
+    document.getElementById('gh').classList.add('has');
+  }).catch(() => {});
+
+/* =====================================================================
+   Interactive TUI demo
+   ===================================================================== */
+(() => {
+  const PKGS = [
+    { r:'extra', n:'firefox', v:'131.0-1', d:'Fast, Private & Safe Web Browser', inst:true, u:'https://www.mozilla.org/firefox/' },
+    { r:'extra', n:'firefox-developer-edition', v:'132.0b5-1', d:'Firefox for developers', u:'https://www.mozilla.org/firefox/developer/' },
+    { r:'extra', n:'firefox-ublock-origin', v:'1.60.0-1', d:'Efficient blocker add-on for various browsers', u:'https://github.com/gorhill/uBlock' },
+    { r:'aur', n:'firefox-bin', v:'131.0-1', d:'Standalone web browser from mozilla.org — binary release', votes:1200, pop:5.2, m:'mozilla-bin', u:'https://www.mozilla.org/firefox/' },
+    { r:'aur', n:'firefox-nightly-bin', v:'133.0a1-1', d:'Nightly build of Firefox', votes:412, pop:1.9, m:'nightly', u:'https://www.mozilla.org/firefox/channel/desktop/' },
+    { r:'aur', n:'firefox-esr-bin', v:'128.3.0-1', d:'Extended Support Release of Firefox', votes:88, pop:0.8, m:'esr', u:'https://www.mozilla.org/firefox/enterprise/' },
+    { r:'extra', n:'neovim', v:'0.10.2-1', d:'Fork of Vim aiming to improve user experience, plugins, and GUIs', inst:true, u:'https://neovim.io' },
+    { r:'aur', n:'neovim-git', v:'0.11.0.r123-1', d:'Fork of Vim aiming to improve user experience (git version)', votes:310, pop:1.1, m:'neovim-dev', u:'https://neovim.io' },
+    { r:'core', n:'linux', v:'6.11.1.arch1-1', d:'The Linux kernel and modules', inst:true, u:'https://kernel.org' },
+    { r:'core', n:'linux-headers', v:'6.11.1.arch1-1', d:'Headers and scripts for building modules for the Linux kernel', u:'https://kernel.org' },
+    { r:'core', n:'linux-lts', v:'6.6.54-1', d:'The LTS Linux kernel and modules', u:'https://kernel.org' },
+    { r:'extra', n:'rust', v:'1:1.88.0-1', d:'Systems programming language focused on safety, speed and concurrency', inst:true, u:'https://www.rust-lang.org' },
+    { r:'extra', n:'rust-analyzer', v:'20241001-1', d:'Rust compiler front-end for IDEs', u:'https://rust-analyzer.github.io' },
+    { r:'aur', n:'yay', v:'12.4.2-1', d:'Yet another yogurt. Pacman wrapper and AUR helper written in go', votes:2600, pop:22.1, m:'jguer', u:'https://github.com/Jguer/yay' },
+    { r:'aur', n:'yay-bin', v:'12.4.2-1', d:'Yet another yogurt — prebuilt binary', votes:870, pop:9.4, m:'jguer', u:'https://github.com/Jguer/yay' },
+    { r:'aur', n:'paru', v:'2.0.4-1', d:'Feature packed AUR helper', votes:1100, pop:12.8, m:'morganamilo', u:'https://github.com/morganamilo/paru' },
+    { r:'extra', n:'htop', v:'3.3.0-3', d:'Interactive process viewer', inst:true, u:'https://htop.dev' },
+    { r:'extra', n:'btop', v:'1.4.0-1', d:'A monitor of system resources, bpytop ported to C++', u:'https://github.com/aristocratos/btop' },
+    { r:'aur', n:'visual-studio-code-bin', v:'1.94.0-1', d:'Visual Studio Code (vscode) — binary release', votes:1500, pop:14.3, m:'dcelasun', u:'https://code.visualstudio.com' },
+    { r:'extra', n:'git', v:'2.46.2-1', d:'The fast distributed version control system', inst:true, u:'https://git-scm.com' },
+    { r:'core', n:'pacman', v:'7.0.0.r3-2', d:'A library-based package manager with dependency support', inst:true, u:'https://archlinux.org/pacman/' },
+    { r:'extra', n:'pacman-contrib', v:'1.10.6-2', d:'Contributed scripts and tools for pacman systems', inst:true, u:'https://gitlab.archlinux.org/pacman/pacman-contrib' },
+    { r:'multilib', n:'steam', v:'1.0.0.81-1', d:"Valve's digital software delivery system", u:'https://steampowered.com' },
+    { r:'multilib', n:'lib32-mesa', v:'1:24.2.4-1', d:'Open-source OpenGL drivers — 32-bit', u:'https://www.mesa3d.org' },
+    { r:'aur', n:'spotify', v:'1:1.2.47-1', d:'A proprietary music streaming service', votes:950, pop:8.7, m:'gromit', u:'https://www.spotify.com' },
+    { r:'extra', n:'alacritty', v:'0.14.0-1', d:'A cross-platform, GPU-accelerated terminal emulator', inst:true, u:'https://alacritty.org' },
+    { r:'extra', n:'ripgrep', v:'14.1.1-1', d:'A search tool that combines the usability of ag with the raw speed of grep', inst:true, u:'https://github.com/BurntSushi/ripgrep' },
+    { r:'extra', n:'base-devel', v:'1-2', d:'Basic tools to build Arch Linux packages', inst:true, u:'https://archlinux.org' },
+  ];
+  const RANK = { core:0, extra:1, multilib:2, aur:3 };
+  const VISIBLE = 5;
+  const $ = id => document.getElementById(id);
+  const term = $('term'), tabsLine = $('tabsLine'), qbox = $('qbox'), qttl = $('qttl'), qline = $('qline'),
+        rbox = $('rbox'), rttl = $('rttl'), rowsEl = $('rows'), statusL = $('statusL'),
+        popLayer = $('popLayer'), popup = $('popup'), liveTag = $('liveTag');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+
+  const S = { mode:'search', q:{ search:'', installed:'' }, sel:0, off:0, focus:'input', popup:null, loading:false, spin:0, user:false, quit:false };
+  let loadTimer = null;
+
+  function score(p, q) { return p.n === q ? 3 : p.n.startsWith(q) ? 2 : p.n.includes(q) ? 1 : 0; }
+  function results() {
+    const q = S.q[S.mode].toLowerCase().trim();
+    if (S.mode === 'search') {
+      if (!q) return [];
+      return PKGS.filter(p => p.n.includes(q) || p.d.toLowerCase().includes(q))
+        .sort((a, b) => (RANK[a.r] - RANK[b.r]) || (score(b, q) - score(a, q)) || (a.n.length - b.n.length) || a.n.localeCompare(b.n));
+    }
+    return PKGS.filter(p => p.inst && (!q || p.n.includes(q))).sort((a, b) => a.n.localeCompare(b.n));
+  }
+  function hl(name) {
+    const q = S.q[S.mode].toLowerCase().trim();
+    const i = q ? name.indexOf(q) : -1;
+    if (i < 0) return esc(name);
+    return esc(name.slice(0, i)) + '<u>' + esc(name.slice(i, i + q.length)) + '</u>' + esc(name.slice(i + q.length));
+  }
+  function clampSel(list) {
+    if (S.sel >= list.length) S.sel = Math.max(0, list.length - 1);
+    if (S.sel < 0) S.sel = 0;
+    if (S.sel < S.off) S.off = S.sel;
+    if (S.sel >= S.off + VISIBLE) S.off = S.sel - VISIBLE + 1;
+    if (S.off > Math.max(0, list.length - VISIBLE)) S.off = Math.max(0, list.length - VISIBLE);
+  }
+
+  function render() {
+    const list = results(); clampSel(list);
+    const search = S.mode === 'search';
+    tabsLine.innerHTML = ` <span data-mode="search" class="${search ? 'on' : ''}">🔍 Search (install)</span> │ <span data-mode="installed" class="${!search ? 'on' : ''}">🗑 Installed (remove)</span>`;
+
+    qbox.classList.toggle('focus', S.focus === 'input');
+    rbox.classList.toggle('focus', S.focus === 'list');
+    qttl.textContent = search ? 'Search (Enter to search, Tab remover)' : 'Filter installed (Enter remove, Tab search)';
+    const q = S.q[S.mode];
+    const cursor = S.focus === 'input' && !S.popup ? '<span class="cur">█</span>' : '';
+    qline.innerHTML = q ? esc(q) + cursor : cursor + `<span class="ph">${search ? 'type a package name…' : 'type to filter installed packages…'}</span>`;
+
+    rttl.textContent = list.length ? `${search ? 'Results' : 'Installed'} (${S.sel + 1}/${list.length})` : (search ? 'Results' : 'Installed');
+    if (!list.length) {
+      rowsEl.innerHTML = `<div class="empty">${search ? (q ? 'No packages match “' + esc(q) + '”.' : 'Start typing to search core, extra, multilib and the AUR.') : 'No installed packages match.'}</div>`;
+    } else {
+      rowsEl.innerHTML = list.slice(S.off, S.off + VISIBLE).map((p, i) => {
+        const idx = S.off + i, sel = idx === S.sel;
+        const repo = search ? p.r : 'local';
+        const extra = (search && p.inst ? ' <span class="inst">[installed]</span>' : '') +
+                      (search && p.r === 'aur' ? ` <span class="votes">(+${p.votes} ${p.pop})</span>` : '');
+        return `<div class="row${sel ? ' sel' : ''}" data-idx="${idx}"><span class="sym">${sel ? '▸' : ''}</span><span class="r-${repo}">${repo}/</span><span class="name">${hl(p.n)}</span> <span class="ver">${esc(p.v)}</span>${extra}<span class="desc">${esc(p.d)}</span></div>`;
+      }).join('');
+    }
+
+    if (S.loading) {
+      statusL.innerHTML = `<span class="spin">${SPIN[S.spin % SPIN.length]}</span> ${search ? 'querying libalpm + aur rpc v5…' : 'reading local db…'}`;
+    } else if (search) {
+      const repo = list.filter(p => p.r !== 'aur').length;
+      statusL.textContent = q ? `Found ${list.length} (repo ${repo} aur ${list.length - repo})  Tab:remover ?:help` : 'Ready · Tab:remover ?:help';
+    } else {
+      statusL.textContent = `${list.length} installed  Enter/d:remove  Tab:search`;
+    }
+
+    if (S.popup) { popLayer.classList.add('show'); popup.innerHTML = popupHTML(S.popup); }
+    else popLayer.classList.remove('show');
+  }
+
+  function popupHTML(p) {
+    const t = `<span class="ttl">${esc(p.title)}</span>`;
+    if (p.type === 'info') {
+      const k = p.pkg;
+      const rows = [['Repository', k.r], ['Name', k.n], ['Version', k.v], ['Description', k.d], ['URL', k.u || '—'],
+        ['Installed', k.inst ? '<span class="ok">yes</span>' : 'no']];
+      if (k.r === 'aur') rows.push(['Maintainer', k.m || '—'], ['Votes', k.votes], ['Popularity', k.pop]);
+      return t + `<div class="kv">${rows.map(([a, b]) => `<span>${a}</span><span>${a === 'Installed' ? b : esc(b)}</span>`).join('')}</div><div class="foot"><b>Esc</b> close · <b>Enter</b> ${k.inst ? 'remove' : 'install'}</div>`;
+    }
+    if (p.type === 'confirm') {
+      return t + `<pre>${p.body}</pre><div class="foot"><b>y</b> confirm · <b>n</b>/<b>Esc</b> cancel</div>`;
+    }
+    if (p.type === 'help') {
+      const keys = [['Tab / ⇧Tab', 'switch Search ↔ Installed'], ['↑ ↓ / j k', 'move selection'], ['Enter', 'search → install / remove'],
+        ['i', 'package info'], ['d x Del', 'remove (Installed mode)'], ['F5 Ctrl+R r', 'refresh sync DB'], ['/', 'focus search bar'],
+        ['?', 'this help'], ['Esc / q', 'close popup / quit']];
+      return t + `<div class="kv">${keys.map(([a, b]) => `<span class="cmd">${esc(a)}</span><span>${esc(b)}</span>`).join('')}</div><div class="foot"><b>Esc</b> close</div>`;
+    }
+    if (p.type === 'msg') {
+      return t + `<pre>${p.lines.join('\n')}</pre>${p.done ? '<div class="foot">press any key</div>' : ''}`;
+    }
+    return '';
+  }
+
+  function touchQuery() {
+    S.sel = 0; S.off = 0; S.loading = true;
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => { S.loading = false; render(); }, 280);
+  }
+  setInterval(() => { if (S.loading) { S.spin++; render(); } }, 80);
+
+  function runMsg(title, lines, after) {
+    S.popup = { type:'msg', title, lines:[], done:false }; render();
+    let i = 0;
+    const tick = () => {
+      if (!S.popup || S.popup.type !== 'msg') return;
+      if (i < lines.length) { S.popup.lines.push(lines[i++]); render(); setTimeout(tick, 380); }
+      else { S.popup.done = true; after && after(); render(); }
+    };
+    setTimeout(tick, 250);
+  }
+
+  function confirmFor(pkg) {
+    if (S.mode === 'installed' || (pkg.inst && S.mode !== 'search')) return confirmRemove(pkg);
+    if (pkg.inst) {
+      S.popup = { type:'msg', title:'Already installed', lines:[`<span class="ok">${esc(pkg.r)}/${esc(pkg.n)}</span> ${esc(pkg.v)} is already installed.`, '', 'Tab → Installed mode to remove it.'], done:true };
+      return;
+    }
+    const body = pkg.r === 'aur'
+      ? `Install <b>aur/${esc(pkg.n)}</b> ${esc(pkg.v)} from the AUR?\n\n  <span class="cmd">git clone https://aur.archlinux.org/${esc(pkg.n)}.git</span>\n  <span class="cmd">makepkg -si</span>   <span class="warn">(PKGBUILD preview first · never as root)</span>\n  build dir: ~/.cache/pacseek/${esc(pkg.n)}`
+      : `Install <b>${esc(pkg.r)}/${esc(pkg.n)}</b> ${esc(pkg.v)}?\n\n  <span class="cmd">sudo pacman -S ${esc(pkg.n)}</span>`;
+    S.popup = { type:'confirm', title:'Confirm install', body, action:'install', pkg };
+  }
+  function confirmRemove(pkg) {
+    const body = `Remove <b>${esc(pkg.n)}</b> and unneeded deps?\n\n  <span class="cmd">sudo pacman -Rs ${esc(pkg.n)}</span>\n\n<span class="c-o">pacman -Qi ${esc(pkg.n)}</span>\n  Name         : ${esc(pkg.n)}\n  Version      : ${esc(pkg.v)}\n  Description  : ${esc(pkg.d)}\n  Install Reason: Explicitly installed`;
+    S.popup = { type:'confirm', title:'Confirm remove', body, action:'remove', pkg };
+  }
+  function confirmRefresh() {
+    S.popup = { type:'confirm', title:'Refresh sync databases', body:`Run <span class="cmd">sudo pacman -Sy</span>?\n\nThe search cache is cleared and the query re-runs afterwards.`, action:'refresh' };
+  }
+
+  function doConfirm() {
+    const p = S.popup;
+    if (p.action === 'install') {
+      const k = p.pkg;
+      const lines = k.r === 'aur'
+        ? [`<span class="c-o">==></span> Cloning ${esc(k.n)}…`, `<span class="c-o">==></span> PKGBUILD reviewed · namcap: <span class="ok">ok</span>`, `<span class="c-o">==></span> Making package: ${esc(k.n)} ${esc(k.v)}`, `<span class="c-o">==></span> Installing with pacman -U…`, `<span class="ok">✓ ${esc(k.n)} installed</span>`]
+        : [`resolving dependencies…`, `:: Proceed with installation? [Y/n] y`, `(1/1) installing ${esc(k.n)}  [######################] 100%`, `<span class="ok">✓ ${esc(k.n)} installed</span>`];
+      runMsg('Installing', lines, () => { k.inst = true; });
+    } else if (p.action === 'remove') {
+      const k = p.pkg;
+      runMsg('Removing', [`checking dependencies…`, `:: Do you want to remove these packages? [Y/n] y`, `(1/1) removing ${esc(k.n)}  [######################] 100%`, `<span class="ok">✓ ${esc(k.n)} removed</span>`], () => { k.inst = false; });
+    } else if (p.action === 'refresh') {
+      runMsg('Refreshing', [':: Synchronizing package databases…', ' core is up to date', ' extra       8.3 MiB  12.1 MiB/s 00:01', ' multilib is up to date', '<span class="ok">✓ cache cleared · re-querying</span>'], () => touchQuery());
+    }
+  }
+
+  function handleKey(key, ctrl) {
+    // quit screen
+    if (S.quit) { S.quit = false; S.popup = null; render(); return true; }
+    // popups
+    if (S.popup) {
+      const p = S.popup;
+      if (p.type === 'msg') { if (p.done) { S.popup = null; render(); } return true; }
+      if (p.type === 'confirm') {
+        if (key === 'y' || key === 'Y') doConfirm();
+        else if (key === 'n' || key === 'N' || key === 'Escape' || key === 'q') S.popup = null;
+        render(); return true;
+      }
+      if (p.type === 'info' && key === 'Enter') { const k = p.pkg; S.popup = null; k.inst && S.mode === 'search' ? confirmRemove(k) : confirmFor(k); render(); return true; }
+      if (['Escape', 'q', 'Enter', '?', 'i'].includes(key)) { S.popup = null; render(); }
+      return true;
+    }
+
+    const list = results();
+    const cur = list[S.sel];
+
+    if (key === 'Tab' || key === 'BackTab') {
+      S.mode = S.mode === 'search' ? 'installed' : 'search';
+      S.sel = 0; S.off = 0; S.focus = S.mode === 'installed' ? 'list' : 'input';
+      touchQuery(); render(); return true;
+    }
+    if (key === 'F5' || (ctrl && (key === 'r' || key === 'R'))) { confirmRefresh(); render(); return true; }
+    if (key === '?') { S.popup = { type:'help', title:'Help — keybindings' }; render(); return true; }
+    if (key === 'ArrowDown') { if (list.length) { if (S.focus === 'input') S.focus = 'list'; else S.sel = Math.min(list.length - 1, S.sel + 1); } render(); return true; }
+    if (key === 'ArrowUp') { if (S.focus === 'list') { if (S.sel === 0) S.focus = 'input'; else S.sel--; } render(); return true; }
+    if (key === 'Escape') { if (S.focus === 'list') S.focus = 'input'; render(); return true; }
+
+    if (S.focus === 'list') {
+      if (key === 'j') { S.sel = Math.min(list.length - 1, S.sel + 1); render(); return true; }
+      if (key === 'k') { S.sel = Math.max(0, S.sel - 1); render(); return true; }
+      if (key === 'Enter' && cur) { confirmFor(cur); render(); return true; }
+      if ((key === 'i' || key === 'I') && cur) { S.popup = { type:'info', title:`Package info — ${cur.n}`, pkg:cur }; render(); return true; }
+      if (['d', 'D', 'x', 'X', 'Delete'].includes(key) && cur) {
+        if (S.mode === 'installed' || cur.inst) confirmRemove(cur);
+        else S.popup = { type:'msg', title:'Not installed', lines:[`${esc(cur.n)} isn't installed, so there's nothing to remove.`], done:true };
+        render(); return true;
+      }
+      if (key === 'r' || key === 'R') { confirmRefresh(); render(); return true; }
+      if (key === 'q') { S.quit = true; S.popup = { type:'msg', title:'pacseek', lines:['Terminal restored ✓  (alternate screen left)', '', 'Just a demo, so press any key to relaunch.'], done:true }; render(); return true; }
+      if (key === '/') { S.focus = 'input'; render(); return true; }
+      if (key === 'Backspace') { S.focus = 'input'; }
+      else if (key.length === 1) { S.focus = 'input'; }
+    }
+
+    // input focus
+    if (key === 'Enter') { if (list.length) S.focus = 'list'; render(); return true; }
+    if (key === 'Backspace') { S.q[S.mode] = S.q[S.mode].slice(0, -1); touchQuery(); render(); return true; }
+    if (key.length === 1 && !ctrl && /[\w\-.+ *^$|()\[\]]/.test(key) && S.q[S.mode].length < 40) {
+      S.q[S.mode] += key.toLowerCase(); touchQuery(); render(); return true;
+    }
+    return false;
+  }
+
+  /* ---- user input ---- */
+  function takeOver() {
+    if (S.user) return;
+    S.user = true;
+    liveTag.textContent = 'live'; liveTag.classList.remove('auto');
+    if (S.popup && S.popup.type !== 'msg') S.popup = null;
+    render();
+  }
+  term.addEventListener('keydown', e => {
+    if (e.metaKey || e.altKey) return;
+    const key = e.key === 'Tab' && e.shiftKey ? 'BackTab' : e.key;
+    const handled = ['Tab', 'BackTab', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Backspace', 'Delete', 'F5'].includes(key) || key.length === 1;
+    if (!handled) return;
+    if (e.ctrlKey && !['r', 'R'].includes(key)) return; // keep browser shortcuts working
+    takeOver();
+    if (handleKey(key, e.ctrlKey) || key === 'Tab' || key === 'BackTab' || key === ' ') e.preventDefault();
+  });
+  term.addEventListener('pointerdown', () => { takeOver(); });
+  term.addEventListener('click', e => {
+    const tab = e.target.closest('[data-mode]');
+    if (tab && !S.popup && tab.dataset.mode !== S.mode) { handleKey('Tab'); return; }
+    const row = e.target.closest('.row');
+    if (row && !S.popup) { S.sel = +row.dataset.idx; S.focus = 'list'; render(); }
+    if (e.target.closest('#qbox') && !S.popup) { S.focus = 'input'; render(); }
+  });
+  term.addEventListener('dblclick', e => { if (e.target.closest('.row') && !S.popup) handleKey('Enter'); });
+  document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    takeOver(); term.focus({ preventScroll: true }); handleKey(c.dataset.key);
+  }));
+
+  /* ---- autoplay until the user takes over ---- */
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function w(ms) { await sleep(ms); return S.user; }
+  async function type(str) { for (const ch of str) { if (await w(95 + Math.random() * 70)) return true; handleKey(ch); } return S.user; }
+  async function clear() { while (S.q[S.mode].length) { if (await w(45)) return true; handleKey('Backspace'); } return S.user; }
+  async function press(k, ms) { if (await w(ms)) return true; handleKey(k); return S.user; }
+
+  async function autoplay() {
+    if (await w(700)) return;
+    while (!S.user) {
+      if (await type('firefox')) return;
+      if (await press('ArrowDown', 1000)) return;
+      if (await press('ArrowDown', 650)) return;
+      if (await press('ArrowDown', 550)) return;
+      if (await press('ArrowDown', 550)) return;
+      if (await press('i', 700)) return;
+      if (await press('Escape', 2400)) return;
+      if (await press('Tab', 700)) return;
+      if (await press('ArrowDown', 900)) return;
+      if (await press('ArrowDown', 450)) return;
+      if (await press('ArrowDown', 450)) return;
+      if (await press('Tab', 1200)) return;
+      if (await clear()) return;
+      if (await type('yay')) return;
+      if (await press('ArrowDown', 900)) return;
+      if (await press('Enter', 650)) return;
+      if (await press('n', 2800)) return;
+      if (await press('Escape', 600)) return;
+      if (await clear()) return;
+      if (await w(500)) return;
+    }
+  }
+
+  // start autoplay only once the demo scrolls into view
+  render();
+  let started = false;
+  const start = () => { if (!started) { started = true; autoplay(); } };
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { start(); io.disconnect(); } }, { threshold: 0.3 });
+    io.observe(term);
+  } else start();
+})();
+</script>
+</body>
+</html>

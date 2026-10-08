@@ -1,8 +1,8 @@
 # pacseek — Project Context
 
 ## Overview
-Fast **AUR + Official Repo** search + TUI install for Arch/Artix, Rust `0.4.1`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
-One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info.
+Fast **AUR + Official Repo** search + TUI install/remove/upgrade for Arch/Artix, Rust `0.5.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
+One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info+deps, `Tab` cycles Search→Installed→Updates.
 
 ```
 ┌ Search (Enter to search) ─────────────────┐
@@ -19,7 +19,7 @@ One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc
 - `rust 1.85+` (MSRV 1.88 for `ratatui 0.30`), `edition 2024`, `tokio` (`rt-multi-thread` + `macros`), `reqwest 0.12` (json+rustls+blocking via OnceLock), `alpm 5` + `pacmanconf 3`, `clap 4.5` derive, `serde`/`serde_json`/`toml 0.8`, `anyhow`/`thiserror`, `colored 2`, `indicatif 0.17`, `tracing 0.1`, `regex 1`, `url 2`
 - TUI: `ratatui 0.30` `crossterm 0.29` `tui-input 0.15` `color-eyre 0.6` `dirs 5` `nix 0.29` `unicode-width 0.2` `signal-hook 0.3`
 - Config: `~/.config/pacseek/config.toml` + `./pacseek.toml` project-local, `[search]/[tui]/[theme]/[behavior]` via `crate::config::Config` (serde TOML, defaults < file < env < CLI)
-- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.1M** `target/release/pacseek`, `dev` `opt-level 0`
+- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.3M** `target/release/pacseek`, `dev` `opt-level 0`
 
 ## Architecture
 ```
@@ -43,10 +43,10 @@ src/
   error.rs
   config.example.toml # example ship
 tests/
-  integration_search.rs # help/version/repo/json/regex-recall (6)
-  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help popups, tabs (10)
+  integration_search.rs # help/version/repo/json/regex-recall/updates/orphans/stats/readonly (11)
+  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help/upgrade popups, tabs, badges (13)
   aur_nan.rs            # NaN sort, unicode truncate (2)
-  lib (src/)            # config 9 + remove 2 + tui::app 20 + aur 2 + repo-fallback 2 + ui 1 + confirm 3 = 39 — total 57 + doc 0
+  lib (src/)            # model 2 + config 9 + remove 2 + tui::app 24 + aur 2 + repo-fallback 2 + ui 1 + confirm 3 + updates 2 + orphans 2 + news 3 + diff 4 + stats 2 + upgrade 1 = 59 — total 85 + doc 0
 ```
 
 ## Skills Used
@@ -59,15 +59,18 @@ tests/
 ```bash
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
-cargo test # 57/57 (lib 39, aur_nan 2, integration 6, tui_snapshot 10) + doc 0
+cargo test # 85/85 (lib 59, aur_nan 2, integration 11, tui_snapshot 13) + doc 0
 pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
 pacseek --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
-cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info, /→search, q→quit
+cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info+deps, Tab→Installed (o orphans), Tab→Updates (U upgrade-all), q→quit
+cargo run -- --updates --json | jq .
+cargo run -- --orphans --json | jq .
+cargo run -- --stats
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
-cargo build --release # 5.1M stripped
-cargo install --path . --force # ~/.cargo/bin/pacseek 0.4.1
+cargo build --release # 5.3M stripped
+cargo install --path . --force # ~/.cargo/bin/pacseek 0.5.0
 ```
 
 ## Flows
@@ -85,7 +88,8 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.4.1
 - **H** 0.3.0: remover + refresh + 47 tests, 5.1M release (historical)
 - **I** `0.4.0`: repo-regex recall, --remove/--refresh confirm, no-expect AUR clients, worker cancel, draw throttle, popup_help, confirm module + tests
 - **J** orphan-spin fix: crossterm poll spins inside its fd-read loop on EIO (dead terminal) — no timeout, signals swallowed by EINTR-continue; parked watchdog probes stdio (/proc/self/fd re-open + zero-write) every 5s and exits 0 — verified e2e via pty harness (was 91% CPU forever, now self-exits rc 0)
-- **K** current `0.4.1`: orphan fix release (no behavior change otherwise) — tag `v0.4.1` builds the GitHub release tarball
+- **K** `0.4.1`: orphan-spin watchdog fix — tag `v0.4.1`
+- **L** current `0.5.0`: maintenance+safety — Updates tab + `--updates/--upgrade` (vercmp + AUR info, news guard), orphans (`-Qdt`, `o` filter, `--orphans`), stats (`--stats`), PKGBUILD diff preview, badges `[OOD]/[ORPHAN]/[UNMAINTAINED]` + deps in info, readonly mode — 85 tests, 5.3M
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)

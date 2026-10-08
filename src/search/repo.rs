@@ -119,6 +119,12 @@ pub fn search_repo_with_config(
                     maintainer: None,
                     num_votes: None,
                     last_modified: None,
+                    depends: None,
+                    optdepends: None,
+                    required_by: None,
+                    optional_for: None,
+                    reason: None,
+                    orphan: false,
                 });
                 if limit != 0 && results.len() >= limit {
                     break;
@@ -159,6 +165,12 @@ pub fn search_repo_with_config(
                     maintainer: None,
                     num_votes: None,
                     last_modified: None,
+                    depends: None,
+                    optdepends: None,
+                    required_by: None,
+                    optional_for: None,
+                    reason: None,
+                    orphan: false,
                 });
                 if limit != 0 && results.len() >= limit {
                     break;
@@ -264,6 +276,12 @@ pub fn search_local_with_config(
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         });
         if limit != 0 && results.len() >= limit {
             break;
@@ -331,6 +349,12 @@ pub fn search_local_fallback(
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         });
         if limit != 0 && results.len() >= limit {
             break;
@@ -415,6 +439,12 @@ pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Pac
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         });
         if limit != 0 && results.len() >= limit {
             break;

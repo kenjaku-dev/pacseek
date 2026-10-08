@@ -36,6 +36,9 @@ fn default_tab_selected() -> String {
 fn default_tab_normal() -> String {
     "dark_gray".into()
 }
+fn default_news_ttl() -> u64 {
+    86400
+}
 
 // ---- top-level -------------------------------------------------------------
 
@@ -228,6 +231,21 @@ pub struct BehaviorConfig {
     pub remove_noconfirm: bool,
     #[serde(default)]
     pub refresh_noconfirm: bool,
+    /// 0.5.0: refuse all mutating ops (install/remove/refresh/upgrade).
+    /// For cautious setups (upstream moson-mo/pacseek#42). CLI --readonly wins.
+    #[serde(default)]
+    pub readonly: bool,
+    /// 0.5.0: Arch-news manual-intervention guard before upgrade/refresh.
+    #[serde(default = "default_true")]
+    pub news_enabled: bool,
+    #[serde(default = "default_news_ttl")]
+    pub news_cache_secs: u64,
+    /// 0.5.0: pager for PKGBUILD diff preview (bat|less|cat|auto).
+    #[serde(default)]
+    pub diff_pager: Option<String>,
+    /// 0.5.0: pass --noconfirm to system upgrade (sudo pacman -Syu).
+    #[serde(default)]
+    pub upgrade_noconfirm: bool,
 }
 
 // ---- path & load -----------------------------------------------------------
@@ -365,6 +383,11 @@ makepkg_noconfirm = false
 remove_flags = "Rs"        # R|Rs|Rns|Ru — sudo pacman -<flags>
 remove_noconfirm = false   # add --noconfirm to remove
 refresh_noconfirm = false  # add --noconfirm to refresh (pacman -Sy)
+readonly = false           # refuse install/remove/refresh/upgrade (safe browse)
+news_enabled = true        # Arch-news intervention guard before upgrade
+news_cache_secs = 86400    # news feed cache TTL
+# diff_pager = "auto"       # auto|bat|less|cat for PKGBUILD diff preview
+upgrade_noconfirm = false  # add --noconfirm to system upgrade
 "#
         .into()
     }
@@ -567,6 +590,15 @@ impl Config {
     }
     pub fn refresh_noconfirm(&self) -> bool {
         self.behavior.refresh_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
+    pub fn upgrade_noconfirm(&self) -> bool {
+        self.behavior.upgrade_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
+    pub fn is_readonly(&self) -> bool {
+        self.behavior.readonly
+    }
+    pub fn news_enabled(&self) -> bool {
+        self.behavior.news_enabled
     }
 }
 

@@ -103,6 +103,37 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         }
     }
 
+    // 0.5.0 safety: show uncommitted/local diff first (paru/yay review pattern).
+    // `git diff` inside the clone surfaces pulled-but-unbuilt changes; first
+    // clone has no diff -> falls through to full PKGBUILD preview below.
+    {
+        let cfg = Config::load();
+        if let Some(diff) = crate::diff::git_diff_cached(safe_name, &cfg) {
+            eprintln!("\n--- PKGBUILD diff (cached vs pulled) ---");
+            let (pager, args) = crate::diff::pager_cmd(&cfg);
+            if pager == "cat" {
+                eprintln!("{diff}");
+            } else {
+                use std::io::Write;
+                let mut child = Command::new(pager)
+                    .args(&args)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit())
+                    .spawn();
+                if let Ok(ref mut c) = child
+                    && let Some(stdin) = c.stdin.as_mut()
+                {
+                    let _ = stdin.write_all(diff.as_bytes());
+                }
+                if let Ok(mut c) = child {
+                    let _ = c.wait();
+                }
+            }
+            eprintln!("--- end diff ---\n");
+        }
+    }
+
     // Show PKGBUILD for review (aur-audit) — use bat if available, else cat
     let pkgbuild = clone_dir.join("PKGBUILD");
     if pkgbuild.exists() {

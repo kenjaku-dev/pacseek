@@ -73,6 +73,28 @@ pub struct Cli {
     #[arg(long)]
     pub refresh: bool,
 
+    /// List available updates (repo + AUR) and exit — non-TUI shortcut for Updates tab.
+    #[arg(long)]
+    pub updates: bool,
+
+    /// List orphan packages (installed as dep, required by nothing) and exit.
+    #[arg(long)]
+    pub orphans: bool,
+
+    /// Show system stats (explicit vs deps, orphans, updates, cache) and exit.
+    #[arg(long)]
+    pub stats: bool,
+
+    /// Upgrade system (sudo pacman -Syu + AUR rebuild hint) — asks to confirm on TTY.
+    /// Honors Arch-news guard unless PACSEEK_NOCONFIRM=1.
+    #[arg(long)]
+    pub upgrade: bool,
+
+    /// Refuse all mutating ops (install/remove/refresh/upgrade) — safe browse mode.
+    /// Mirrors config [behavior] readonly.
+    #[arg(long)]
+    pub readonly: bool,
+
     /// Generate example config at default location and exit
     #[arg(long)]
     pub init_config: bool,

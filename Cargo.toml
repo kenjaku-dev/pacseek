@@ -1,6 +1,6 @@
 [package]
 name = "pacseek"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 description = "Fast package search for Arch/Artix official repos and AUR — written in Rust"
 authors = ["achraf"]

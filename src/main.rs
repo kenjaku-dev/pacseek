@@ -72,10 +72,139 @@ async fn main() -> anyhow::Result<()> {
     if !cli.no_color && cfg.theme.no_color {
         cli.no_color = true;
     }
+    let readonly = cli.readonly || cfg.is_readonly();
+
+    // 0.5.0 read-only fast paths: --updates/--orphans/--stats are safe, always allowed.
+    if cli.updates {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        let repo = pacseek::updates::check_repo_updates().unwrap_or_default();
+        // AUR check needs async client; reuse timeout from config.
+        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
+        let client = reqwest::Client::builder()
+            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(timeout)
+            .build();
+        let mut all = repo;
+        if let Ok(client) = client {
+            let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+            all.extend(aur);
+        }
+        all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+        pacseek::output::print_updates(&all, cli.json, cli.no_color)?;
+        return Ok(());
+    }
+    if cli.orphans {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        let orphans = pacseek::orphans::list_orphans()
+            .or_else(|_| pacseek::orphans::list_orphans_fallback())
+            .unwrap_or_default();
+        pacseek::output::print_orphans(&orphans, cli.json, cli.no_color)?;
+        return Ok(());
+    }
+    if cli.stats {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        let mut stats = pacseek::stats::gather_local_stats();
+        // Best-effort AUR update count (offline -> 0, never fatal).
+        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
+        if let Ok(client) = reqwest::Client::builder()
+            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(timeout)
+            .build()
+        {
+            let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+            stats.updates_aur = aur.len();
+        }
+        pacseek::output::print_stats(&stats, cli.json, cli.no_color)?;
+        return Ok(());
+    }
+
+    // 0.5.0 --upgrade with Arch-news guard (haj/pacsea pattern).
+    if cli.upgrade {
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        if readonly {
+            eprintln!(
+                "refusing to upgrade: readonly mode is enabled (--readonly / [behavior] readonly)"
+            );
+            std::process::exit(2);
+        }
+        // News guard unless explicitly non-interactive.
+        let noconfirm_env = std::env::var("PACSEEK_NOCONFIRM").is_ok();
+        if !noconfirm_env {
+            let news = pacseek::news::fetch_arch_news(&cfg);
+            if pacseek::news::has_intervention(&news, true) {
+                eprintln!("⚠ Arch news reports manual intervention may be required:");
+                for item in news.iter().filter(|i| i.needs_action).take(3) {
+                    eprintln!("  • {} ({})", item.title, item.link);
+                }
+                eprintln!("Read https://archlinux.org/news/ before upgrading.");
+                if should_confirm(cfg.upgrade_noconfirm(), std::io::stdin().is_terminal()) {
+                    let stdin = std::io::stdin();
+                    let mut input = stdin.lock();
+                    let mut output = std::io::stderr();
+                    if !confirm_prompt(
+                        "Proceed with system upgrade anyway?",
+                        &mut input,
+                        &mut output,
+                    ) {
+                        eprintln!("cancelled");
+                        return Ok(());
+                    }
+                } else if !cfg.upgrade_noconfirm() {
+                    eprintln!(
+                        "refusing to upgrade without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 to force"
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+        let noconfirm = cfg.upgrade_noconfirm();
+        if should_confirm(noconfirm, std::io::stdin().is_terminal()) {
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut output = std::io::stderr();
+            if !confirm_prompt(
+                "Upgrade system (sudo pacman -Syu)?",
+                &mut input,
+                &mut output,
+            ) {
+                eprintln!("cancelled");
+                return Ok(());
+            }
+        } else if !noconfirm {
+            eprintln!(
+                "refusing to upgrade without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+            );
+            std::process::exit(2);
+        }
+        match pacseek::install::upgrade::upgrade_system(&cfg) {
+            Ok(()) => {
+                println!("System upgraded");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("upgrade failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI.
     // Destructive: confirm on TTY unless noconfirm; refuse silently-piped runs.
     if let Some(name) = cli.remove.clone() {
+        if readonly {
+            eprintln!(
+                "refusing to remove: readonly mode is enabled (--readonly / [behavior] readonly)"
+            );
+            std::process::exit(2);
+        }
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
@@ -113,6 +242,12 @@ async fn main() -> anyhow::Result<()> {
     // --refresh fast path (no TUI, no search) — mirrors TUI r/F5 confirm in TUI.
     // Runs sudo: confirm on TTY unless noconfirm; refuse silently-piped runs.
     if cli.refresh {
+        if readonly {
+            eprintln!(
+                "refusing to refresh: readonly mode is enabled (--readonly / [behavior] readonly)"
+            );
+            std::process::exit(2);
+        }
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }

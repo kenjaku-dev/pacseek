@@ -27,25 +27,29 @@ pub enum Focus {
     List,
 }
 
-/// TUI mode — Tab switches between installing new packages and removing installed ones.
+/// TUI mode — Tab cycles installing / removing / updating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     #[default]
     Search,
     Installed,
+    Updates,
 }
 
 impl Mode {
     pub fn toggle(self) -> Self {
+        // Tab cycles all three (Search -> Installed -> Updates -> Search).
         match self {
             Mode::Search => Mode::Installed,
-            Mode::Installed => Mode::Search,
+            Mode::Installed => Mode::Updates,
+            Mode::Updates => Mode::Search,
         }
     }
     pub fn tab_index(self) -> usize {
         match self {
             Mode::Search => 0,
             Mode::Installed => 1,
+            Mode::Updates => 2,
         }
     }
 }
@@ -57,6 +61,7 @@ pub enum Popup {
     Confirm(Package),
     ConfirmRemove(Package),
     ConfirmRefresh,
+    ConfirmUpgrade,
     Help,
     Message(String),
 }
@@ -75,6 +80,13 @@ pub struct App {
     /// Last query per mode — switching tabs restores each mode's results without refetch.
     pub last_query_search: String,
     pub last_query_installed: String,
+    pub last_query_updates: String,
+    /// 0.5.0: readonly browse mode (no mutating ops).
+    pub readonly: bool,
+    /// 0.5.0: Installed-tab orphan filter (`o` toggles `pacman -Qdt` view).
+    pub orphans_only: bool,
+    /// 0.5.0: raw updates for upgrade-all (display mirrors `packages`).
+    pub updates: Vec<crate::updates::PkgUpdate>,
     pub limit: usize,
     pub source: Source,
     pub aur_by: AurBy,
@@ -144,6 +156,10 @@ impl App {
             last_query: String::new(),
             last_query_search: String::new(),
             last_query_installed: String::new(),
+            last_query_updates: String::new(),
+            readonly: false,
+            orphans_only: false,
+            updates: Vec::new(),
             limit: 50,
             source: Source::All,
             aur_by: AurBy::NameDesc,
@@ -175,6 +191,7 @@ impl App {
         app.use_regex = cli.regex;
         app.installed_only = cli.installed_only;
         app.no_color = cli.no_color || std::env::var("NO_COLOR").is_ok();
+        app.readonly = cli.readonly;
         app
     }
 
@@ -187,6 +204,7 @@ impl App {
         app.use_regex = cli.regex;
         app.installed_only = cli.installed_only;
         app.no_color = cli.no_color || cfg.theme.no_color || std::env::var("NO_COLOR").is_ok();
+        app.readonly = cli.readonly || cfg.is_readonly();
         app.config = cfg.clone();
         app.styles = ThemeStyles::from(&cfg.theme);
         app.border_type = crate::config::border_type_from_str(&cfg.tui.border);
@@ -195,14 +213,15 @@ impl App {
 
     fn cache_key(&self, query: &str) -> String {
         format!(
-            "{:?}|{}|{}|{:?}|{:?}|{}|{}",
+            "{:?}|{}|{}|{:?}|{:?}|{}|{}|{}",
             self.mode,
             query,
             self.limit,
             self.source,
             self.aur_by,
             self.use_regex,
-            self.installed_only
+            self.installed_only,
+            self.orphans_only
         )
     }
 
@@ -246,12 +265,30 @@ impl App {
             self.last_query_installed = query.clone();
             if total == 0 {
                 self.status = if query.is_empty() {
-                    "No installed packages".into()
+                    if self.orphans_only {
+                        "No orphans — system clean".into()
+                    } else {
+                        "No installed packages".into()
+                    }
                 } else {
                     format!("No installed match for '{}'", query)
                 };
+            } else if self.orphans_only {
+                self.status = format!("Orphans {} (unrequired deps)", total);
             } else {
                 self.status = format!("Installed {} (local {})", total, total);
+            }
+        } else if self.mode == Mode::Updates {
+            self.last_query_updates = query.clone();
+            let repo_count = self.packages.iter().filter(|p| p.repo != "aur").count();
+            let aur_count = total.saturating_sub(repo_count);
+            if total == 0 {
+                self.status = "System up to date".into();
+            } else {
+                self.status = format!(
+                    "Updates {} (repo {} aur {}) — U:upgrade all",
+                    total, repo_count, aur_count
+                );
             }
         } else {
             self.last_query_search = query.clone();
@@ -266,30 +303,45 @@ impl App {
         self.dirty = true;
     }
 
-    /// Switch Search <-> Installed (Tab). Clears list, restores per-mode hint,
-    /// and triggers a fresh search (Installed with empty filter lists all).
+    /// Switch Search <-> Installed <-> Updates (Tab). Clears list, restores per-mode hint,
+    /// and triggers a fresh search (Installed/Updates with empty filter list all).
     pub fn switch_mode(&mut self) {
-        self.mode = self.mode.toggle();
-        // Remember per-mode queries
-        if self.mode == Mode::Installed {
-            self.last_query_search = self.last_query.clone();
-            self.last_query = self.last_query_installed.clone();
-        } else {
-            self.last_query_installed = self.last_query.clone();
-            self.last_query = self.last_query_search.clone();
+        // Stash current query per outgoing mode.
+        match self.mode {
+            Mode::Search => self.last_query_search = self.last_query.clone(),
+            Mode::Installed => self.last_query_installed = self.last_query.clone(),
+            Mode::Updates => self.last_query_updates = self.last_query.clone(),
         }
+        self.mode = self.mode.toggle();
+        // Restore incoming mode's query.
+        self.last_query = match self.mode {
+            Mode::Search => self.last_query_search.clone(),
+            Mode::Installed => self.last_query_installed.clone(),
+            Mode::Updates => self.last_query_updates.clone(),
+        };
         self.packages.clear();
         self.list_state.select(None);
         self.popup = Popup::None;
         self.search_rx = None;
+        let ro = if self.readonly { " [RO]" } else { "" };
         self.status = match self.mode {
-            Mode::Search => "Type to search, Enter search, F5 refresh, Tab remover, ? help".into(),
+            Mode::Search => {
+                format!("Type to search, Enter search, F5 refresh, Tab remover, ? help{ro}")
+            }
             Mode::Installed => {
-                "Installed mode — type to filter, Enter remove, F5 refresh, Tab back, ? help".into()
+                format!(
+                    "Installed mode — type to filter, Enter remove, o orphans, F5 refresh, Tab updates, ? help{ro}"
+                )
+            }
+            Mode::Updates => {
+                format!(
+                    "Updates — Enter upgrade one, U upgrade all, F5 refresh, Tab search, ? help{ro}"
+                )
             }
         };
-        // Installed with empty filter should list all; Search with empty clears.
-        let should_fetch = self.mode == Mode::Installed || !self.input.value().trim().is_empty();
+        // Installed/Updates with empty filter list all; Search with empty clears.
+        let should_fetch =
+            !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
         if should_fetch {
             self.is_loading = true;
             self.trigger_search();
@@ -436,7 +488,7 @@ impl App {
                             }
                         }
                         KeyCode::Enter => {
-                            // Confirm install / remove / refresh
+                            // Confirm install / remove / refresh / upgrade
                             match self.popup.clone() {
                                 Popup::Confirm(pkg) => {
                                     self.popup = Popup::None;
@@ -449,6 +501,10 @@ impl App {
                                 Popup::ConfirmRefresh => {
                                     self.popup = Popup::None;
                                     self.do_refresh(terminal)?;
+                                }
+                                Popup::ConfirmUpgrade => {
+                                    self.popup = Popup::None;
+                                    self.do_upgrade(terminal)?;
                                 }
                                 _ => {
                                     self.popup = Popup::None;
@@ -467,6 +523,10 @@ impl App {
                             Popup::ConfirmRefresh => {
                                 self.popup = Popup::None;
                                 self.do_refresh(terminal)?;
+                            }
+                            Popup::ConfirmUpgrade => {
+                                self.popup = Popup::None;
+                                self.do_upgrade(terminal)?;
                             }
                             _ => {}
                         },
@@ -532,16 +592,33 @@ impl App {
                         self.do_search(terminal)?;
                         self.focus = Focus::List;
                     } else if self.popup == Popup::None {
-                        // Install or remove selected depending on mode
+                        // Install / remove / upgrade-one depending on mode
                         if let Some(idx) = self.list_state.selected()
                             && let Some(pkg) = self.packages.get(idx).cloned()
                         {
                             self.popup = match self.mode {
                                 Mode::Search => Popup::Confirm(pkg),
                                 Mode::Installed => Popup::ConfirmRemove(pkg),
+                                Mode::Updates => Popup::Confirm(pkg),
                             };
                         }
                     }
+                }
+                // 0.5.0: U upgrades all (Updates tab or anywhere in list).
+                KeyCode::Char('U') if self.popup == Popup::None && self.focus == Focus::List => {
+                    self.popup = Popup::ConfirmUpgrade;
+                }
+                // 0.5.0: o toggles orphans-only in Installed tab.
+                KeyCode::Char('o') | KeyCode::Char('O')
+                    if self.mode == Mode::Installed
+                        && self.focus == Focus::List
+                        && self.popup == Popup::None =>
+                {
+                    self.orphans_only = !self.orphans_only;
+                    self.last_query.clear();
+                    self.clear_cache();
+                    self.is_loading = true;
+                    self.trigger_search();
                 }
                 KeyCode::Delete | KeyCode::Backspace
                     if self.mode == Mode::Installed
@@ -662,7 +739,77 @@ impl App {
     // Phase B: non-blocking — spawn background thread, parallel repo+aur via OnceLock client & cached Config
     // Phase C: respect CLI filters (source, by, regex, installed_only, limit) per tui audit
     // v0.3.0: Installed mode uses localdb (allows empty filter = list all); Search uses cached cfg for AUR.
+    // 0.5.0: Updates mode lists repo+AUR updates; Installed `o` filters orphans-only.
     pub(crate) fn trigger_search(&mut self) {
+        // Updates mode: empty filter lists all updates (repo + AUR).
+        if self.mode == Mode::Updates {
+            let query = self.input.value().trim().to_string();
+            if query == self.last_query && !self.packages.is_empty() {
+                self.is_loading = false;
+                return;
+            }
+            let key = self.cache_key(&query);
+            if let Some(pkgs) = self.cache_get(&key) {
+                self.search_rx = None;
+                self.apply_results(pkgs, query);
+                return;
+            }
+            self.is_loading = true;
+            self.dirty = true;
+            self.status = "Checking for updates...".into();
+            self.next_search_id = self.next_search_id.wrapping_add(1);
+            self.search_id = self.next_search_id;
+            self.active_search.store(self.search_id, Ordering::Relaxed);
+            let search_id = self.search_id;
+            let active = self.active_search.clone();
+            let limit = self.limit;
+            let use_regex = self.use_regex;
+            let query_clone = query.clone();
+            let cfg = self.config.clone();
+            let (tx, rx) = mpsc::channel();
+            self.search_rx = Some(rx);
+            thread::spawn(move || {
+                let mut all = crate::updates::check_repo_updates().unwrap_or_default();
+                all.extend(crate::updates::check_aur_updates_blocking(&cfg));
+                all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+                // Filter by input (name substring, or regex when enabled).
+                let filtered: Vec<crate::updates::PkgUpdate> = if query_clone.is_empty() {
+                    all
+                } else if use_regex {
+                    match regex::RegexBuilder::new(&query_clone)
+                        .case_insensitive(true)
+                        .build()
+                    {
+                        Ok(re) => all.into_iter().filter(|u| re.is_match(&u.name)).collect(),
+                        Err(_) => all,
+                    }
+                } else {
+                    let ql = query_clone.to_lowercase();
+                    all.into_iter()
+                        .filter(|u| u.name.to_lowercase().contains(&ql))
+                        .collect()
+                };
+                let mut pkgs: Vec<Package> = filtered
+                    .iter()
+                    .map(|u| {
+                        let mut p =
+                            Package::minimal(u.name.clone(), u.new_version.clone(), u.repo.clone());
+                        p.installed = true;
+                        p.description = Some(format!("{} -> {}", u.old_version, u.new_version));
+                        p.out_of_date = if u.out_of_date { Some(1) } else { None };
+                        p
+                    })
+                    .collect();
+                if limit != 0 && pkgs.len() > limit {
+                    pkgs.truncate(limit);
+                }
+                if active.load(Ordering::Relaxed) != search_id {
+                    return;
+                }
+                let _ = tx.send((search_id, pkgs, query_clone));
+            });
+            return;
+        }
         // Installed mode: empty filter lists all installed (up to limit)
         if self.mode == Mode::Installed {
             let query = self.input.value().trim().to_string();
@@ -680,7 +827,11 @@ impl App {
             self.is_loading = true;
             self.dirty = true;
             self.status = if query.is_empty() {
-                "Listing installed packages...".into()
+                if self.orphans_only {
+                    "Listing orphans...".into()
+                } else {
+                    "Listing installed packages...".into()
+                }
             } else {
                 format!("Filtering installed for '{}'...", query)
             };
@@ -691,15 +842,29 @@ impl App {
             let active = self.active_search.clone();
             let limit = self.limit;
             let use_regex = self.use_regex;
+            let orphans_only = self.orphans_only;
             let query_clone = query.clone();
             let (tx, rx) = mpsc::channel();
             self.search_rx = Some(rx);
             thread::spawn(move || {
-                let res = crate::search::repo::search_local(&query_clone, limit, use_regex)
+                let mut res = crate::search::repo::search_local(&query_clone, limit, use_regex)
                     .or_else(|_| {
                         crate::search::repo::search_local_fallback(&query_clone, limit, use_regex)
                     })
                     .unwrap_or_default();
+                if orphans_only {
+                    let orphans = crate::orphans::list_orphans()
+                        .or_else(|_| crate::orphans::list_orphans_fallback())
+                        .unwrap_or_default();
+                    let names: std::collections::HashSet<String> =
+                        orphans.into_iter().map(|p| p.name).collect();
+                    res.retain(|p| names.contains(&p.name));
+                    // Enrich orphan flag for badges.
+                    for p in &mut res {
+                        p.orphan = true;
+                        p.reason = Some("dependency".to_string());
+                    }
+                }
                 // Superseded while scanning (e.g. rapid Tab switches): drop the
                 // result instead of waking the UI with stale data.
                 if active.load(Ordering::Relaxed) != search_id {
@@ -816,6 +981,12 @@ impl App {
     }
 
     fn do_install(&mut self, pkg: Package, terminal: &mut DefaultTerminal) -> Result<()> {
+        if self.readonly {
+            self.popup = Popup::Message("Readonly mode — install disabled".into());
+            self.status = "Refused install: readonly mode".into();
+            self.dirty = true;
+            return Ok(());
+        }
         // Suspend TUI and run pacman / makepkg per aur-guides + tui-design lifecycle
         let pkg_clone = pkg.clone();
         let is_aur = pkg.repo == "aur";
@@ -850,6 +1021,12 @@ impl App {
     }
 
     fn do_remove(&mut self, pkg: Package, terminal: &mut DefaultTerminal) -> Result<()> {
+        if self.readonly {
+            self.popup = Popup::Message("Readonly mode — remove disabled".into());
+            self.status = "Refused remove: readonly mode".into();
+            self.dirty = true;
+            return Ok(());
+        }
         let name = pkg.name.clone();
         let name_for_closure = name.clone();
         let cfg = self.config.clone();
@@ -879,6 +1056,12 @@ impl App {
     }
 
     fn do_refresh(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        if self.readonly {
+            self.popup = Popup::Message("Readonly mode — refresh disabled".into());
+            self.status = "Refused refresh: readonly mode".into();
+            self.dirty = true;
+            return Ok(());
+        }
         // Suspend TUI and run `sudo pacman -Sy` with inherited stdio (real TTY for sudo)
         let cfg = self.config.clone();
         let refresh_result = super::super::tui::suspend_and_run(terminal, move || {
@@ -899,9 +1082,67 @@ impl App {
         self.last_query.clear();
         self.last_query_search.clear();
         self.last_query_installed.clear();
+        self.last_query_updates.clear();
         self.clear_cache();
         self.dirty = true;
-        let should_fetch = self.mode == Mode::Installed || !self.input.value().trim().is_empty();
+        let should_fetch =
+            !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
+        if should_fetch {
+            self.is_loading = true;
+            self.trigger_search();
+        }
+        Ok(())
+    }
+
+    fn do_upgrade(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        if self.readonly {
+            self.popup = Popup::Message("Readonly mode — upgrade disabled".into());
+            self.status = "Refused upgrade: readonly mode".into();
+            self.dirty = true;
+            return Ok(());
+        }
+        // Arch-news guard (fail-open offline): warn inside the flow, still ask.
+        let news = crate::news::fetch_arch_news(&self.config);
+        if crate::news::has_intervention(&news, true) {
+            let titles: Vec<String> = news
+                .iter()
+                .filter(|i| i.needs_action)
+                .take(2)
+                .map(|i| i.title.clone())
+                .collect();
+            self.popup = Popup::Message(format!(
+                "⚠ Manual intervention? {} — press U again to proceed",
+                titles.join("; ")
+            ));
+            self.status = "Upgrade held for news review — press U again".into();
+            self.dirty = true;
+            // Second U press proceeds (popup Message dismisses first).
+            // To keep it simple: require explicit re-confirm via ConfirmUpgrade
+            // re-open — caller presses U again after reading.
+            return Ok(());
+        }
+        let cfg = self.config.clone();
+        let res = super::super::tui::suspend_and_run(terminal, move || {
+            crate::install::upgrade::upgrade_system(&cfg)
+        });
+        match res {
+            Ok(()) => {
+                self.status = "System upgraded".into();
+                self.popup = Popup::Message("✓ System upgraded".into());
+            }
+            Err(e) => {
+                self.status = format!("Upgrade failed: {e}");
+                self.popup = Popup::Message(format!("✗ Upgrade failed: {e}"));
+            }
+        }
+        self.last_query.clear();
+        self.last_query_search.clear();
+        self.last_query_installed.clear();
+        self.last_query_updates.clear();
+        self.clear_cache();
+        self.dirty = true;
+        let should_fetch =
+            !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
         if should_fetch {
             self.is_loading = true;
             self.trigger_search();
@@ -1042,6 +1283,11 @@ mod tests {
             show_config: false,
             remove: None,
             refresh: false,
+            updates: false,
+            orphans: false,
+            stats: false,
+            upgrade: false,
+            readonly: false,
         };
         let app = App::new_with_cli("test".into(), &cli);
         assert_eq!(app.limit, 10);
@@ -1072,6 +1318,8 @@ mod tests {
         assert_eq!(app.mode, Mode::Installed);
         // Empty filter in Installed lists all -> loading
         assert!(app.is_loading);
+        app.switch_mode();
+        assert_eq!(app.mode, Mode::Updates);
         app.switch_mode();
         assert_eq!(app.mode, Mode::Search);
     }
@@ -1111,6 +1359,12 @@ mod tests {
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         }];
         app.list_state.select(Some(0));
         let ev = Event::Key(crossterm::event::KeyEvent::new(
@@ -1142,6 +1396,12 @@ mod tests {
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         }];
         app.list_state.select(Some(0));
         let ev = Event::Key(crossterm::event::KeyEvent::new(
@@ -1172,6 +1432,12 @@ mod tests {
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         };
         let key = app.cache_key("vim");
         app.cache_put(key, vec![pkg]);
@@ -1199,6 +1465,12 @@ mod tests {
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         };
         for i in 0..(SEARCH_CACHE_CAP + 5) {
             app.cache_put(format!("k{i}"), vec![mk("x")]);
@@ -1305,5 +1577,68 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let _ = app.handle_event(&ev, &mut terminal);
         assert_eq!(app.popup, Popup::ConfirmRefresh);
+    }
+
+    #[test]
+    fn u_in_list_opens_confirm_upgrade() {
+        let mut app = App::new("".into());
+        app.focus = Focus::List;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('U'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_eq!(app.popup, Popup::ConfirmUpgrade);
+    }
+
+    #[test]
+    fn o_in_installed_toggles_orphans_only() {
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
+        let mut app = App::new("".into());
+        app.mode = Mode::Installed;
+        app.focus = Focus::List;
+        assert!(!app.orphans_only);
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('o'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert!(app.orphans_only);
+    }
+
+    #[test]
+    fn readonly_blocks_mutating_ops() {
+        let mut app = App::new("".into());
+        app.readonly = true;
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let pkg = crate::model::Package::minimal("vim".into(), "1-1".into(), "extra".into());
+        let _ = app.do_install(pkg.clone(), &mut terminal);
+        assert!(matches!(app.popup, Popup::Message(_)));
+        let _ = app.do_remove(pkg, &mut terminal);
+        assert!(matches!(app.popup, Popup::Message(_)));
+        let _ = app.do_upgrade(&mut terminal);
+        assert!(matches!(app.popup, Popup::Message(_)));
+    }
+
+    #[test]
+    fn three_tab_cycle_covers_updates() {
+        let mut app = App::new("".into());
+        assert_eq!(app.mode.tab_index(), 0);
+        app.switch_mode();
+        assert_eq!(app.mode, Mode::Installed);
+        // Updates fetch spawns workers; skip live part offline.
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
+        app.switch_mode();
+        assert_eq!(app.mode, Mode::Updates);
+        assert_eq!(app.mode.tab_index(), 2);
     }
 }

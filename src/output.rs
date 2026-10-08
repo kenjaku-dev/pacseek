@@ -102,17 +102,165 @@ fn print_package(pkg: &Package, kind: &str) {
         let pop = pkg.popularity.unwrap_or(0.0);
         let ood = pkg
             .out_of_date
-            .map(|_| " [out-of-date]".red().to_string())
+            .map(|_| " [OOD]".red().bold().to_string())
             .unwrap_or_default();
-        format!(" (+{} {:.2}){}", votes, pop, ood)
+        let orphan = if pkg.orphan {
+            " [ORPHAN]".red().to_string()
+        } else {
+            String::new()
+        };
+        let unmaint = if pkg
+            .maintainer
+            .as_deref()
+            .map(|m| m.trim().is_empty())
+            .unwrap_or(true)
+        {
+            " [UNMAINTAINED]".yellow().to_string()
+        } else {
+            String::new()
+        };
+        format!(" (+{} {:.2}){}{}{}", votes, pop, ood, orphan, unmaint)
     } else {
-        "".to_string()
+        if pkg.orphan {
+            " [ORPHAN]".red().to_string()
+        } else {
+            String::new()
+        }
     };
 
     let desc = pkg.short_desc().dimmed();
 
     println!("{} {} {}{}", repo_colored, version, aur_extra, installed);
     println!("    {}", desc);
+    // 0.5.0: dependency hints for safety (remove path) — one line, dimmed.
+    if let Some(req) = pkg.required_by.as_ref().filter(|v| !v.is_empty()) {
+        let preview: Vec<&str> = req.iter().take(5).map(|s| s.as_str()).collect();
+        let more = if req.len() > 5 {
+            format!(" +{}", req.len() - 5)
+        } else {
+            String::new()
+        };
+        println!(
+            "    {}",
+            format!("Required by: {}{}", preview.join(", "), more).dimmed()
+        );
+    }
+    if let Some(opt) = pkg.optdepends.as_ref().filter(|v| !v.is_empty()) {
+        let preview: Vec<&str> = opt.iter().take(3).map(|s| s.as_str()).collect();
+        println!(
+            "    {}",
+            format!("Optdepends: {}", preview.join(", ")).dimmed()
+        );
+    }
+}
+
+pub fn print_updates(
+    updates: &[crate::updates::PkgUpdate],
+    json: bool,
+    no_color: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(updates)?);
+        return Ok(());
+    }
+    if no_color {
+        colored::control::set_override(false);
+    }
+    if updates.is_empty() {
+        eprintln!("{}", "System up to date.".green());
+        return Ok(());
+    }
+    for u in updates {
+        let name = format!("{}/{}", u.repo, u.name).bold();
+        let arrow = format!(
+            "{} -> {}",
+            u.old_version.dimmed(),
+            u.new_version.green().bold()
+        );
+        let ood = if u.out_of_date {
+            " [OOD]".red().bold().to_string()
+        } else {
+            String::new()
+        };
+        println!("{}{} {}", name, ood, arrow);
+    }
+    eprintln!(
+        "\n{} {}",
+        "Updates:".dimmed(),
+        updates.len().to_string().bold()
+    );
+    Ok(())
+}
+
+pub fn print_orphans(pkgs: &[Package], json: bool, no_color: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(pkgs)?);
+        return Ok(());
+    }
+    if no_color {
+        colored::control::set_override(false);
+    }
+    if pkgs.is_empty() {
+        eprintln!("{}", "No orphans found.".green());
+        return Ok(());
+    }
+    for pkg in pkgs {
+        println!(
+            "{} {}",
+            format!("local/{}", pkg.name).bold(),
+            pkg.version.dimmed()
+        );
+    }
+    eprintln!(
+        "\n{} {}",
+        "Orphans:".dimmed(),
+        pkgs.len().to_string().bold()
+    );
+    eprintln!(
+        "{}",
+        "Remove with: pacseek --remove <pkg>  (or Tab remover in TUI)".dimmed()
+    );
+    Ok(())
+}
+
+pub fn print_stats(
+    stats: &crate::stats::SysStats,
+    json: bool,
+    no_color: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(stats)?);
+        return Ok(());
+    }
+    if no_color {
+        colored::control::set_override(false);
+    }
+    println!("{} {}", "Explicit:".bold(), stats.explicit);
+    println!("{} {}", "Dependencies:".bold(), stats.dependencies);
+    println!(
+        "{} {}",
+        "Orphans:".bold(),
+        if stats.orphans == 0 {
+            stats.orphans.to_string().green().bold().to_string()
+        } else {
+            stats.orphans.to_string().yellow().bold().to_string()
+        }
+    );
+    println!("{} {}", "Repo updates:".bold(), stats.updates_repo);
+    if stats.updates_aur > 0 {
+        println!("{} {}", "AUR updates:".bold(), stats.updates_aur);
+    }
+    println!(
+        "{} {}",
+        "Pacman cache:".bold(),
+        crate::stats::human_bytes(stats.cache_pacman_bytes).dimmed()
+    );
+    println!(
+        "{} {}",
+        "pacseek cache:".bold(),
+        crate::stats::human_bytes(stats.cache_pacseek_bytes).dimmed()
+    );
+    Ok(())
 }
 
 pub fn print_json_error(msg: &str) {

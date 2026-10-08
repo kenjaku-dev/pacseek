@@ -119,6 +119,12 @@ impl From<AurPackage> for Package {
             maintainer: p.maintainer,
             num_votes: p.num_votes,
             last_modified: p.last_modified,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         }
     }
 }

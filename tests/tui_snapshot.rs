@@ -18,6 +18,12 @@ fn sample_packages() -> Vec<Package> {
             maintainer: None,
             num_votes: None,
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         },
         Package {
             name: "firefox-bin".into(),
@@ -33,6 +39,12 @@ fn sample_packages() -> Vec<Package> {
             maintainer: Some("someone".into()),
             num_votes: Some(1200),
             last_modified: Some(1700000000),
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         },
     ]
 }
@@ -107,6 +119,12 @@ fn sample_installed() -> Vec<Package> {
         maintainer: None,
         num_votes: None,
         last_modified: None,
+        depends: None,
+        optdepends: None,
+        required_by: None,
+        optional_for: None,
+        reason: Some("explicit".into()),
+        orphan: false,
     }]
 }
 
@@ -205,4 +223,42 @@ fn tui_no_color_tabs_ascii() {
     app.list_state.select(Some(0));
     let content = render(&app, 80, 24);
     assert!(content.contains("Installed"));
+}
+
+#[test]
+fn tui_updates_tab_renders() {
+    let mut app = App::new("".into());
+    // Search -> Installed -> Updates
+    app.switch_mode();
+    app.switch_mode();
+    assert_eq!(app.mode, Mode::Updates);
+    app.focus = Focus::List;
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Updates"));
+    assert!(content.contains("upgrade"));
+}
+
+#[test]
+fn tui_confirm_upgrade_popup_renders() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.popup = Popup::ConfirmUpgrade;
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Confirm upgrade"));
+    assert!(content.contains("pacman -Syu"));
+}
+
+#[test]
+fn tui_ood_orphan_badges_render() {
+    use pacseek::model::Package;
+    let mut aur = Package::minimal("foo".into(), "2-1".into(), "aur".into());
+    aur.out_of_date = Some(1);
+    aur.orphan = true;
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.packages = vec![aur];
+    app.list_state.select(Some(0));
+    let content = render(&app, 80, 24);
+    assert!(content.contains("[OOD]"));
+    assert!(content.contains("[ORPHAN]"));
 }

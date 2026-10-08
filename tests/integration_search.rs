@@ -76,3 +76,66 @@ fn regex_recall_matches_substring() {
         );
     }
 }
+
+#[test]
+fn help_shows_new_maintenance_flags() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--updates"))
+        .stdout(predicate::str::contains("--orphans"))
+        .stdout(predicate::str::contains("--stats"))
+        .stdout(predicate::str::contains("--upgrade"));
+}
+
+#[test]
+fn updates_lists_valid_json() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd.args(["--updates", "--json"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("updates json valid");
+    assert!(v.is_array());
+}
+
+#[test]
+fn orphans_lists_valid_json() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd.args(["--orphans", "--json"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("orphans json valid");
+    assert!(v.is_array());
+}
+
+#[test]
+fn stats_valid_json() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd.args(["--stats", "--json"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stats json valid");
+    assert!(v.get("explicit").is_some());
+    assert!(v.get("orphans").is_some());
+}
+
+#[test]
+fn readonly_refuses_mutating_ops() {
+    for args in [
+        vec!["--readonly", "--remove", "vim"],
+        vec!["--readonly", "--refresh"],
+        vec!["--readonly", "--upgrade"],
+    ] {
+        let mut cmd = Command::cargo_bin("pacseek").unwrap();
+        let output = cmd
+            .args(&args)
+            .env("PACSEEK_NOCONFIRM", "1")
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "args {args:?} must be refused in readonly"
+        );
+    }
+}

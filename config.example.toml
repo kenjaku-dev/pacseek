@@ -21,6 +21,7 @@ highlight_symbol = "▸ "
 popup_info = [70, 60]
 popup_confirm = [60, 30]
 popup_message = [60, 20]
+popup_help = [70, 60]
 debounce_ms = 400
 poll_ms = 200
 
@@ -58,3 +59,8 @@ makepkg_noconfirm = false
 remove_flags = "Rs"
 remove_noconfirm = false
 refresh_noconfirm = false
+readonly = false
+news_enabled = true
+news_cache_secs = 86400
+upgrade_noconfirm = false
+# diff_pager = "auto"

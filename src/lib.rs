@@ -1,9 +1,14 @@
 pub mod cli;
 pub mod config;
 pub mod confirm;
+pub mod diff;
 pub mod error;
 pub mod install;
 pub mod model;
+pub mod news;
+pub mod orphans;
 pub mod output;
 pub mod search;
+pub mod stats;
 pub mod tui;
+pub mod updates;

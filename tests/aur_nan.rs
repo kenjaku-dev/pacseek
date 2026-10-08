@@ -17,6 +17,12 @@ fn sort_with_nan_does_not_panic() {
             maintainer: None,
             num_votes: Some(10),
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         },
         Package {
             name: "b".into(),
@@ -32,6 +38,12 @@ fn sort_with_nan_does_not_panic() {
             maintainer: None,
             num_votes: Some(5),
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         },
         Package {
             name: "c".into(),
@@ -47,6 +59,12 @@ fn sort_with_nan_does_not_panic() {
             maintainer: None,
             num_votes: Some(20),
             last_modified: None,
+            depends: None,
+            optdepends: None,
+            required_by: None,
+            optional_for: None,
+            reason: None,
+            orphan: false,
         },
     ];
 

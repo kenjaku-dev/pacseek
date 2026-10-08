@@ -73,6 +73,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         Popup::Confirm(pkg) => draw_confirm_popup(f, pkg, area, app),
         Popup::ConfirmRemove(pkg) => draw_confirm_remove_popup(f, pkg, area, app),
         Popup::ConfirmRefresh => draw_confirm_refresh_popup(f, area, app),
+        Popup::ConfirmUpgrade => draw_confirm_upgrade_popup(f, area, app),
         Popup::Help => draw_help_popup(f, area, app),
         Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
@@ -81,13 +82,18 @@ pub fn draw(f: &mut Frame, app: &App) {
 
 fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
     let use_color = !app.no_color;
-    let titles: Vec<Line> = if area.width < 50 {
+    let titles: Vec<Line> = if area.width < 60 {
         // Narrow ASCII fallback — no emoji, short labels
-        vec![Line::from("[1]Search"), Line::from("[2]Installed")]
+        vec![
+            Line::from("[1]Search"),
+            Line::from("[2]Installed"),
+            Line::from("[3]Updates"),
+        ]
     } else {
         vec![
             Line::from("🔍 Search (install)"),
             Line::from("🗑 Installed (remove)"),
+            Line::from("⬆ Updates"),
         ]
     };
     let tabs = Tabs::new(titles)
@@ -102,7 +108,7 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
         })
-        .divider(if area.width < 50 { "|" } else { " │ " });
+        .divider(if area.width < 60 { "|" } else { " │ " });
     // Hint on the right is rendered via status/help; keep tabs single-line, no border (clutter audit).
     f.render_widget(tabs, area);
     let _ = Mode::Search; // keep import used in narrow builds
@@ -113,9 +119,17 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
         (Mode::Search, Focus::Search) => " Search (Enter to search, F5 refresh, Tab remover) ",
         (Mode::Search, Focus::List) => " Search (/ to focus, F5 refresh, Tab remover) ",
         (Mode::Installed, Focus::Search) => {
-            " Filter installed (Enter filter, F5 refresh, Tab back) "
+            " Filter installed (Enter filter, o orphans, F5 refresh, Tab updates) "
         }
-        (Mode::Installed, Focus::List) => " Filter installed (/ to focus, F5 refresh, Tab back) ",
+        (Mode::Installed, Focus::List) => {
+            " Filter installed (/ to focus, o orphans, F5 refresh, Tab updates) "
+        }
+        (Mode::Updates, Focus::Search) => {
+            " Filter updates (Enter filter, U upgrade all, Tab search) "
+        }
+        (Mode::Updates, Focus::List) => {
+            " Filter updates (/ to focus, Enter upgrade one, U upgrade all, Tab search) "
+        }
     };
     let style = if app.no_color {
         Style::default()
@@ -186,7 +200,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 fn draw_results(f: &mut Frame, app: &App, area: Rect) {
     let mode_tag = match app.mode {
         Mode::Search => "",
-        Mode::Installed => "installed ",
+        Mode::Installed => {
+            if app.orphans_only {
+                "orphans "
+            } else {
+                "installed "
+            }
+        }
+        Mode::Updates => "updates ",
     };
     let title = format!(
         " Results {}{} {} ",
@@ -208,18 +229,21 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             match app.mode {
                 Mode::Search => "Searching...",
                 Mode::Installed => "Listing installed...",
+                Mode::Updates => "Checking for updates...",
             }
         } else if app.input.value().trim().is_empty() {
             match app.mode {
                 Mode::Search => "Type a package name above and press Enter — e.g. firefox",
                 Mode::Installed => {
-                    "Installed mode — type to filter, empty shows all (Tab: back to search)"
+                    "Installed mode — type to filter, empty shows all (o: orphans, Tab: updates)"
                 }
+                Mode::Updates => "Updates mode — empty shows all (U: upgrade all, Tab: search)",
             }
         } else {
             match app.mode {
                 Mode::Search => "No packages found. Try another query or check filters.",
                 Mode::Installed => "No installed packages match. Clear filter or press Tab.",
+                Mode::Updates => "No updates match. System up to date.",
             }
         };
         let p = Paragraph::new(text)
@@ -275,17 +299,26 @@ fn draw_results(f: &mut Frame, app: &App, area: Rect) {
             let aur_extra = if pkg.repo == "aur" {
                 let votes = pkg.votes.unwrap_or(0);
                 let pop = pkg.popularity.unwrap_or(0.0);
-                let ood = if pkg.out_of_date.is_some() {
-                    " [out-of-date]"
-                } else {
-                    ""
-                };
+                let mut tags = format!(" (+{} {:.2})", votes, pop);
+                for b in pkg.badges() {
+                    tags.push(' ');
+                    tags.push_str(b);
+                }
                 Span::styled(
-                    format!(" (+{} {:.2}){}", votes, pop, ood),
+                    tags,
                     if use_color {
                         app.styles.votes
                     } else {
                         Style::default()
+                    },
+                )
+            } else if pkg.orphan {
+                Span::styled(
+                    " [ORPHAN]",
+                    if use_color {
+                        app.styles.out_of_date
+                    } else {
+                        Style::default().add_modifier(Modifier::BOLD)
                     },
                 )
             } else {
@@ -366,10 +399,16 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             " ↑↓/j k:move Enter:install i:info r/F5:refresh /:search Tab:remover ?:help q:quit "
         }
         (Mode::Installed, Focus::Search) => {
-            " Enter:filter F5:refresh Esc:list Tab:search ?:help Ctrl+C:quit "
+            " Enter:filter o:orphans F5:refresh Esc:list Tab:updates ?:help Ctrl+C:quit "
         }
         (Mode::Installed, Focus::List) => {
-            " ↑↓/j k:move Enter/d:remove i:info r/F5:refresh /:filter Tab:search ?:help q:quit "
+            " ↑↓/j k:move Enter/d:remove o:orphans i:info r/F5:refresh /:filter Tab:updates ?:help q:quit "
+        }
+        (Mode::Updates, Focus::Search) => {
+            " Enter:filter U:upgrade-all F5:refresh Esc:list Tab:search ?:help Ctrl+C:quit "
+        }
+        (Mode::Updates, Focus::List) => {
+            " ↑↓/j k:move Enter:upgrade-one U:upgrade-all i:info F5:refresh /:filter Tab:search ?:help q:quit "
         }
     };
     let p = Paragraph::new(help)
@@ -447,17 +486,47 @@ fn draw_info_popup(f: &mut Frame, pkg: &crate::model::Package, area: Rect, app: 
             ),
         ]),
         Line::from(vec![Span::styled(
-            if pkg.out_of_date.is_some() {
-                "[out-of-date]"
-            } else {
-                ""
-            },
+            pkg.badges().join(" "),
             if app.no_color {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
                 app.styles.out_of_date
             },
         )]),
+        Line::from(vec![
+            Span::styled("Reason: ", bold(app.styles.status_loading)),
+            Span::raw(pkg.reason.as_deref().unwrap_or("-")),
+            Span::raw(
+                pkg.required_by
+                    .as_ref()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| {
+                        format!(
+                            "  Required by: {}",
+                            v.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+                        )
+                    })
+                    .unwrap_or_default(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Depends: ", bold(app.styles.status_loading)),
+            Span::raw(
+                pkg.depends
+                    .as_ref()
+                    .map(|v| v.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+                    .unwrap_or_else(|| "-".into()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Optdepends: ", bold(app.styles.status_loading)),
+            Span::raw(
+                pkg.optdepends
+                    .as_ref()
+                    .map(|v| v.iter().take(3).cloned().collect::<Vec<_>>().join(", "))
+                    .unwrap_or_else(|| "-".into()),
+            ),
+        ]),
         Line::raw(""),
         Line::from(Span::styled(
             "Press Esc/q/Enter to close",
@@ -694,6 +763,65 @@ fn draw_confirm_refresh_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(p, inner);
 }
 
+fn draw_confirm_upgrade_popup(f: &mut Frame, area: Rect, app: &App) {
+    let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Confirm upgrade ")
+        .borders(Borders::ALL)
+        .border_type(app.border_type)
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_title
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_bg
+        });
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    let text = vec![
+        Line::from("Upgrade full system?"),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "Y",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.installed
+                },
+            ),
+            Span::raw("/Enter = yes  "),
+            Span::styled(
+                "N/Esc",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.out_of_date
+                },
+            ),
+            Span::raw(" = cancel"),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Will run: sudo pacman -Syu [needs password] + news guard",
+            if app.no_color {
+                Style::default()
+            } else {
+                app.styles.text_dim
+            },
+        )),
+    ];
+    let p = Paragraph::new(text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(Wrap { trim: true });
+    f.render_widget(p, inner);
+}
+
 fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
     let sz = app.config.tui.popup_help.unwrap_or([70, 60]);
     let popup_area = centered_rect(sz[0], sz[1], area);
@@ -715,22 +843,29 @@ fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     let lines = vec![
-        Line::from("Tab / Shift+Tab : switch Search <-> Installed"),
+        Line::from("Tab / Shift+Tab : cycle Search -> Installed -> Updates"),
         Line::from("F5 / Ctrl+R     : refresh sync DBs (confirm, anywhere)"),
         Line::from(""),
         Line::from("Search mode:"),
         Line::from("  type + Enter  : search repo+AUR"),
         Line::from("  ↑↓ / j k      : navigate"),
         Line::from("  Enter         : install selected"),
-        Line::from("  i             : package info (in list)"),
+        Line::from("  i             : package info + deps (in list)"),
         Line::from("  r             : refresh (in list; F5 works while typing)"),
         Line::from(""),
         Line::from("Installed mode:"),
         Line::from("  type + Enter  : filter installed"),
         Line::from("  ↑↓ / j k      : navigate"),
         Line::from("  Enter / d / x : remove selected"),
-        Line::from("  i             : package info (in list)"),
+        Line::from("  o             : toggle orphans-only (Qdt)"),
+        Line::from("  i             : package info + deps (in list)"),
         Line::from("  r             : refresh (in list; F5 works while typing)"),
+        Line::from(""),
+        Line::from("Updates mode:"),
+        Line::from("  type + Enter  : filter updates"),
+        Line::from("  Enter         : upgrade single package"),
+        Line::from("  U             : upgrade all (sudo pacman -Syu, news-guarded)"),
+        Line::from("  i             : package info (in list)"),
         Line::from(""),
         Line::from("Global: / focus search, Esc focus toggle, ? help, q quit (in list)"),
         Line::from(""),
