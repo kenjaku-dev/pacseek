@@ -202,6 +202,46 @@ fn foreign_packages() -> anyhow::Result<Vec<(String, String)>> {
 /// Blocking AUR updates for TUI worker threads (no tokio runtime there).
 /// Same batching/graceful logic as the async version.
 pub fn check_aur_updates_blocking(cfg: &crate::config::Config) -> Vec<PkgUpdate> {
+    check_aur_updates_blocking_cached(cfg)
+}
+
+/// Memoized wrapper (`caching` skill: TTL + explicit invalidate).
+/// Tab-switching back to Updates within the TTL reuses the last fetch
+/// instead of hammering the AUR RPC; `F5`/upgrade/downgrade paths call
+/// `invalidate_aur_memo()` for a fresh check.
+pub fn check_aur_updates_blocking_cached(cfg: &crate::config::Config) -> Vec<PkgUpdate> {
+    const TTL_SECS: u64 = 300;
+    let now = std::time::Instant::now();
+    let memo = AUR_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(guard) = memo.lock()
+        && let (Some(at), ref cached) = *guard
+        // Cache hits include empty lists: a failed/offline fetch backs off
+        // for the TTL instead of timing out on every Tab press. F5 forces
+        // a fresh check via invalidate_aur_memo().
+        && now.duration_since(at).as_secs() < TTL_SECS
+    {
+        return cached.clone();
+    }
+    let fresh = check_aur_updates_blocking_live(cfg);
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (Some(now), fresh.clone());
+    }
+    fresh
+}
+
+/// Forget the memoized AUR update list (refresh/upgrade/clean paths).
+pub fn invalidate_aur_memo() {
+    let memo = AUR_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (None, Vec::new());
+    }
+}
+
+static AUR_MEMO: std::sync::OnceLock<
+    std::sync::Mutex<(Option<std::time::Instant>, Vec<PkgUpdate>)>,
+> = std::sync::OnceLock::new();
+
+fn check_aur_updates_blocking_live(cfg: &crate::config::Config) -> Vec<PkgUpdate> {
     let foreign = foreign_packages().unwrap_or_default();
     if foreign.is_empty() {
         return vec![];
@@ -296,5 +336,20 @@ mod tests {
             alpm::vercmp("1-1".to_string(), "1-1".to_string()),
             std::cmp::Ordering::Equal
         );
+    }
+
+    #[test]
+    fn aur_memo_invalidate_is_safe() {
+        invalidate_aur_memo();
+        // Cached wrapper works and second call hits the memo (same content).
+        // Live network: hermetic on content equality, skip fully offline.
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
+        let cfg = crate::config::Config::default();
+        let a = check_aur_updates_blocking_cached(&cfg);
+        let b = check_aur_updates_blocking_cached(&cfg);
+        assert_eq!(a, b);
+        invalidate_aur_memo();
     }
 }

@@ -120,11 +120,12 @@ pub fn parse_rss(xml: &str) -> Vec<NewsItem> {
         }
         let hay = format!("{title} {desc}").to_lowercase();
         let needs_action = INTERVENTION_HINTS.iter().any(|h| hay.contains(h));
+        let pub_epoch = pub_date.as_deref().and_then(parse_rfc2822_epoch);
         out.push(NewsItem {
             title: html_unescape(&title),
             link,
             pub_date: pub_date.clone(),
-            pub_epoch: None,
+            pub_epoch,
             needs_action,
         });
         if out.len() >= 30 {
@@ -165,25 +166,107 @@ pub fn has_intervention(items: &[NewsItem], recent_only: bool) -> bool {
         if !recent_only {
             return true;
         }
-        match i.pub_date.as_deref().map(parse_rfc2822_epoch) {
-            Some(Some(epoch)) => {
+        let epoch = i
+            .pub_epoch
+            .or_else(|| i.pub_date.as_deref().and_then(parse_rfc2822_epoch));
+        match epoch {
+            Some(e) => {
                 let now = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
-                now - epoch < 7 * 86400
+                now - e < 7 * 86400
             }
-            _ => true,
+            // Unparseable dates count as recent (fail-closed for safety).
+            None => true,
         }
     })
 }
 
-fn parse_rfc2822_epoch(s: &str) -> Option<i64> {
-    // Lightweight: try `date -d` style via chrono-less fallback — extract
-    // 4-digit year and assume recent when unparseable (fail-closed above).
-    // For exactness the guard treats garbage as recent, so None is fine.
-    let _ = s;
-    None
+/// Parse RFC2822 dates as emitted by the Arch news feed, e.g.
+/// `Mon, 01 Jan 2026 00:00:00 +0000`, to unix epoch. Hand-rolled std-only
+/// (no chrono dep for one feed): returns None on garbage, and the guard
+/// treats None as recent (fail-closed for safety).
+pub fn parse_rfc2822_epoch(s: &str) -> Option<i64> {
+    // Strip optional weekday prefix.
+    let s = s.trim();
+    let s = match s.split_once(", ") {
+        Some((_, rest)) => rest.trim(),
+        None => s,
+    };
+    // Expect: DD Mon YYYY HH:MM:SS ±ZZZZ
+    let mut parts = s.split_whitespace();
+    let day: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = match parts.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = parts.next()?.parse().ok()?;
+    let time = parts.next()?;
+    let mut t = time.split(':');
+    let (hh, mm, ss): (i64, i64, i64) = (
+        t.next()?.parse().ok()?,
+        t.next()?.parse().ok()?,
+        t.next()?.parse().ok()?,
+    );
+    if t.next().is_some()
+        || !(0..24).contains(&hh)
+        || !(0..60).contains(&mm)
+        || !(0..61).contains(&ss)
+    {
+        return None;
+    }
+    let tz = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let tz_secs = parse_tz_offset(tz)?;
+    // Days from civil (Howard Hinnant) → epoch days.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (month + 9).rem_euclid(12);
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + hh * 3600 + mm * 60 + ss - tz_secs)
+}
+
+fn parse_tz_offset(tz: &str) -> Option<i64> {
+    // Numeric ±HHMM, or classic military/zone names seen in feeds.
+    if tz.eq_ignore_ascii_case("UT")
+        || tz.eq_ignore_ascii_case("GMT")
+        || tz.eq_ignore_ascii_case("Z")
+    {
+        return Some(0);
+    }
+    let (sign, digits) = match tz.strip_prefix('+') {
+        Some(d) => (1i64, d),
+        None => {
+            let d = tz.strip_prefix('-')?;
+            (-1i64, d)
+        }
+    };
+    if digits.len() != 4 {
+        return None;
+    }
+    let hh: i64 = digits[..2].parse().ok()?;
+    let mm: i64 = digits[2..].parse().ok()?;
+    if hh > 14 || mm > 59 {
+        return None;
+    }
+    Some(sign * (hh * 3600 + mm * 60))
 }
 
 #[cfg(test)]
@@ -216,5 +299,31 @@ mod tests {
         let mut cfg = crate::config::Config::default();
         cfg.behavior.news_enabled = false;
         assert!(fetch_arch_news(&cfg).is_empty());
+    }
+
+    #[test]
+    fn rfc2822_vectors() {
+        // Vectors verified with `date -u -d ... +%s` on the build machine.
+        assert_eq!(
+            parse_rfc2822_epoch("Mon, 01 Jan 2026 00:00:00 +0000"),
+            Some(1767225600)
+        );
+        assert_eq!(
+            parse_rfc2822_epoch("Thu, 01 Jan 1970 00:00:00 +0000"),
+            Some(0)
+        );
+        assert_eq!(
+            parse_rfc2822_epoch("Tue, 15 Aug 2023 12:30:00 +0200"),
+            Some(1692095400)
+        );
+        // Same instant, different zone rendering.
+        assert_eq!(
+            parse_rfc2822_epoch("Tue, 15 Aug 2023 10:30:00 +0000"),
+            Some(1692095400)
+        );
+        // Garbage never parses (guard treats as recent = fail-closed).
+        assert_eq!(parse_rfc2822_epoch("not a date"), None);
+        assert_eq!(parse_rfc2822_epoch("32 Foo 2026 99:99:99 +0000"), None);
+        assert_eq!(parse_rfc2822_epoch(""), None);
     }
 }

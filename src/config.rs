@@ -39,6 +39,9 @@ fn default_tab_normal() -> String {
 fn default_news_ttl() -> u64 {
     86400
 }
+fn default_clean_keep() -> u32 {
+    2
+}
 
 // ---- top-level -------------------------------------------------------------
 
@@ -212,7 +215,7 @@ impl Default for ThemeConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BehaviorConfig {
     #[serde(default)]
@@ -246,6 +249,35 @@ pub struct BehaviorConfig {
     /// 0.5.0: pass --noconfirm to system upgrade (sudo pacman -Syu).
     #[serde(default)]
     pub upgrade_noconfirm: bool,
+    /// 5.1: keep N package versions when cleaning (paccache -k).
+    #[serde(default = "default_clean_keep")]
+    pub clean_keep: u32,
+    /// 5.1: non-interactive clean (sudo -n fails fast instead of prompting).
+    #[serde(default)]
+    pub clean_noconfirm: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for BehaviorConfig {
+    fn default() -> Self {
+        Self {
+            bottom_up: false,
+            verbose: 0,
+            aur_rpc: None,
+            cache_dir: None,
+            makepkg_noconfirm: false,
+            remove_flags: default_remove_flags(),
+            remove_noconfirm: false,
+            refresh_noconfirm: false,
+            readonly: false,
+            news_enabled: true,
+            news_cache_secs: default_news_ttl(),
+            diff_pager: None,
+            upgrade_noconfirm: false,
+            clean_keep: default_clean_keep(),
+            clean_noconfirm: false,
+        }
+    }
 }
 
 // ---- path & load -----------------------------------------------------------
@@ -388,6 +420,8 @@ news_enabled = true        # Arch-news intervention guard before upgrade
 news_cache_secs = 86400    # news feed cache TTL
 # diff_pager = "auto"       # auto|bat|less|cat for PKGBUILD diff preview
 upgrade_noconfirm = false  # add --noconfirm to system upgrade
+clean_keep = 2             # paccache -k: versions to keep on --clean (min 1)
+clean_noconfirm = false    # non-interactive clean (sudo -n, fails fast)
 "#
         .into()
     }
@@ -597,6 +631,19 @@ impl Config {
     pub fn is_readonly(&self) -> bool {
         self.behavior.readonly
     }
+    pub fn clean_noconfirm(&self) -> bool {
+        self.behavior.clean_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
+    /// Effective keep count: CLI --keep wins when non-default, else config.
+    /// Clamped to >= 1 — keep 0 would nuke the whole cache.
+    pub fn effective_keep(&self, cli_keep: u32) -> u32 {
+        let base = if cli_keep != 2 {
+            cli_keep
+        } else {
+            self.behavior.clean_keep
+        };
+        base.max(1)
+    }
     pub fn news_enabled(&self) -> bool {
         self.behavior.news_enabled
     }
@@ -638,6 +685,20 @@ mod tests {
         let cfg = Config::load_from(&p).unwrap();
         assert_eq!(cfg.search.source, "all");
         assert_eq!(cfg.search.by, "name-desc");
+    }
+
+    #[test]
+    fn effective_keep_clamps_and_prefers_cli() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.effective_keep(2), 2);
+        assert_eq!(cfg.effective_keep(1), 1);
+        assert_eq!(cfg.effective_keep(0), 1);
+        cfg.behavior.clean_keep = 3;
+        assert_eq!(cfg.effective_keep(2), 3);
+        assert_eq!(cfg.effective_keep(1), 1);
+        assert!(!cfg.clean_noconfirm());
+        cfg.behavior.clean_noconfirm = true;
+        assert!(cfg.clean_noconfirm());
     }
 
     #[test]

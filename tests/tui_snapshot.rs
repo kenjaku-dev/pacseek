@@ -262,3 +262,38 @@ fn tui_ood_orphan_badges_render() {
     assert!(content.contains("[OOD]"));
     assert!(content.contains("[ORPHAN]"));
 }
+
+#[test]
+fn tui_confirm_clean_popup_renders() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.popup = Popup::ConfirmClean {
+        files: 16,
+        bytes: 870 * 1024 * 1024,
+    };
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Confirm clean"));
+    assert!(content.contains("16 cached files"));
+    assert!(content.contains("paccache"));
+}
+
+#[test]
+fn tui_confirm_upgrade_warn_renders() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.upgrade_warn = Some("Linux 6.9 requires manual intervention".into());
+    app.popup = Popup::ConfirmUpgrade;
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Confirm upgrade"));
+    assert!(content.contains("Manual intervention"));
+}
+
+#[test]
+fn tui_help_mentions_clean_and_updates() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.popup = Popup::Help;
+    let content = render(&app, 80, 24);
+    assert!(content.contains("clean cache"));
+    assert!(content.contains("Updates"));
+}

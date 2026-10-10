@@ -269,3 +269,43 @@ pub fn print_json_error(msg: &str) {
         serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!(r#"{{"error":"{}"}}"#, msg));
     eprintln!("{}", s);
 }
+
+pub fn print_clean(
+    preview: &crate::install::clean::CleanPreview,
+    dry_run: bool,
+    json: bool,
+    no_color: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(preview)?);
+        return Ok(());
+    }
+    if no_color {
+        colored::control::set_override(false);
+    }
+    if preview.files == 0 {
+        eprintln!("{}", "Cache already clean.".green());
+        return Ok(());
+    }
+    let size = crate::stats::human_bytes(preview.bytes);
+    if dry_run {
+        println!(
+            "Would remove {} files ({}) [keep {}]",
+            preview.files,
+            size.green().bold(),
+            preview.keep,
+        );
+        eprintln!(
+            "{}",
+            "Preview only — nothing removed. Drop --dry-run to clean.".dimmed()
+        );
+    } else {
+        println!(
+            "{} {} files ({})",
+            "✓ Cleaned".green().bold(),
+            preview.files,
+            size.green().bold(),
+        );
+    }
+    Ok(())
+}

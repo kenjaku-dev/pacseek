@@ -90,6 +90,20 @@ pub struct Cli {
     #[arg(long)]
     pub upgrade: bool,
 
+    /// Clean package cache (sudo paccache -r) — asks to confirm on TTY.
+    /// Pair with --keep N (default 2) and --dry-run for a preview.
+    #[arg(long)]
+    pub clean: bool,
+
+    /// Keep N versions of each package when cleaning (default 2, min 1).
+    /// Only meaningful with --clean.
+    #[arg(long, default_value_t = 2, value_name = "N")]
+    pub keep: u32,
+
+    /// Preview only (with --clean): show reclaimable files/bytes, remove nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+
     /// Refuse all mutating ops (install/remove/refresh/upgrade) — safe browse mode.
     /// Mirrors config [behavior] readonly.
     #[arg(long)]

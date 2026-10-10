@@ -1,8 +1,8 @@
 # pacseek — Project Context
 
 ## Overview
-Fast **AUR + Official Repo** search + TUI install/remove/upgrade for Arch/Artix, Rust `0.5.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
-One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info+deps, `Tab` cycles Search→Installed→Updates.
+Fast **AUR + Official Repo** search + TUI install/remove/upgrade/clean for Arch/Artix, Rust `0.5.1`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
+One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info+deps, `Tab` cycles Search→Installed→Updates, `c` cleans cache.
 
 ```
 ┌ Search (Enter to search) ─────────────────┐
@@ -43,10 +43,10 @@ src/
   error.rs
   config.example.toml # example ship
 tests/
-  integration_search.rs # help/version/repo/json/regex-recall/updates/orphans/stats/readonly (11)
-  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help/upgrade popups, tabs, badges (13)
+  integration_search.rs # help/version/repo/json/regex-recall/updates/orphans/stats/readonly/clean (14)
+  tui_snapshot.rs       # TestBackend 80x24, 50x8 too-small, info/confirm/help/upgrade/clean popups, tabs, badges (16)
   aur_nan.rs            # NaN sort, unicode truncate (2)
-  lib (src/)            # model 2 + config 9 + remove 2 + tui::app 24 + aur 2 + repo-fallback 2 + ui 1 + confirm 3 + updates 2 + orphans 2 + news 3 + diff 4 + stats 2 + upgrade 1 = 59 — total 85 + doc 0
+  lib (src/)            # model 2 + config 10 + remove 2 + tui::app 28 + aur 2 + repo-fallback 2 + ui 1 + confirm 3 + updates 3 + orphans 2 + news 4 + diff 5 + stats 2 + upgrade 1 + clean 5 = 72 — total 104 + doc 0
 ```
 
 ## Skills Used
@@ -59,18 +59,19 @@ tests/
 ```bash
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
-cargo test # 85/85 (lib 59, aur_nan 2, integration 11, tui_snapshot 13) + doc 0
+cargo test # 104/104 (lib 72, aur_nan 2, integration 14, tui_snapshot 16) + doc 0
 pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
 pacseek --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
-cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info+deps, Tab→Installed (o orphans), Tab→Updates (U upgrade-all), q→quit
+cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info+deps, Tab→Installed (o orphans, c clean), Tab→Updates (U upgrade-all), q→quit
 cargo run -- --updates --json | jq .
 cargo run -- --orphans --json | jq .
 cargo run -- --stats
+cargo run -- --clean --dry-run # preview reclaimable cache (paccache -k2)
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
 cargo build --release # 5.3M stripped
-cargo install --path . --force # ~/.cargo/bin/pacseek 0.5.0
+cargo install --path . --force # ~/.cargo/bin/pacseek 0.5.1
 ```
 
 ## Flows
@@ -89,7 +90,8 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.5.0
 - **I** `0.4.0`: repo-regex recall, --remove/--refresh confirm, no-expect AUR clients, worker cancel, draw throttle, popup_help, confirm module + tests
 - **J** orphan-spin fix: crossterm poll spins inside its fd-read loop on EIO (dead terminal) — no timeout, signals swallowed by EINTR-continue; parked watchdog probes stdio (/proc/self/fd re-open + zero-write) every 5s and exits 0 — verified e2e via pty harness (was 91% CPU forever, now self-exits rc 0)
 - **K** `0.4.1`: orphan-spin watchdog fix — tag `v0.4.1`
-- **L** current `0.5.0`: maintenance+safety — Updates tab + `--updates/--upgrade` (vercmp + AUR info, news guard), orphans (`-Qdt`, `o` filter, `--orphans`), stats (`--stats`), PKGBUILD diff preview, badges `[OOD]/[ORPHAN]/[UNMAINTAINED]` + deps in info, readonly mode — 85 tests, 5.3M
+- **L** `0.5.0`: maintenance+safety — Updates tab + `--updates/--upgrade` (vercmp + AUR info, news guard), orphans (`-Qdt`, `o` filter, `--orphans`), stats (`--stats`), PKGBUILD diff preview, badges `[OOD]/[ORPHAN]/[UNMAINTAINED]` + deps in info, readonly mode — 85 tests, 5.3M
+- **M** current `0.5.1`: cache cleaner + paper cuts — `--clean [--keep N] [--dry-run]` (paccache `-d` preview parse, `sudo -r` run) + TUI `c` + ConfirmClean popup, real RFC2822 news dates, inline upgrade warning (no two-`U` dance), AUR memo 5min + F5 invalidate, recursive cache sizes, fetch-before-diff (15s bound), BackTab reverse, `U` scoped to Updates, condensed help popup — 104 tests, 5.3M
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)

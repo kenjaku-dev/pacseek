@@ -87,13 +87,17 @@ pub fn render_diff(old: &str, new: &str, max_lines: usize) -> String {
     out.join("\n")
 }
 
-/// Try `git diff` inside an existing clone (fetch skipped — caller decides).
+/// Try `git diff` inside an existing clone.
 /// Returns None when no clone/diff (first install) so callers show full PKGBUILD.
 pub fn git_diff_cached(name: &str, cfg: &crate::config::Config) -> Option<String> {
     let dir = clone_dir_for(cfg, name)?;
     if !dir.join(".git").exists() {
         return None;
     }
+    // 5.1: fetch upstream first so the diff reflects pulled-but-unbuilt
+    // changes, not just local edits. Best-effort with a timeout: offline or
+    // slow networks fall back to the cached diff (fail-open).
+    fetch_quiet(&dir);
     let output = std::process::Command::new("git")
         .args([
             "-C",
@@ -114,6 +118,36 @@ pub fn git_diff_cached(name: &str, cfg: &crate::config::Config) -> Option<String
     } else {
         Some(s.chars().take(8000).collect())
     }
+}
+
+/// `git fetch --quiet origin` bounded by `timeout` (default 15s).
+/// Returns true on success; false covers offline/slow/missing-remote —
+/// callers must treat false as "use cached state", never as fatal.
+pub fn fetch_upstream(dir: &std::path::Path, timeout: std::time::Duration) -> bool {
+    let dir = dir.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    // std has no Command timeout, so park the wait on a thread and bound the
+    // recv instead (`resilience-failure`: unbounded waits hang the caller).
+    // The orphaned child on timeout is short-lived (git fetch exits alone).
+    std::thread::spawn(move || {
+        let status = std::process::Command::new("git")
+            .args([
+                "-C",
+                dir.to_string_lossy().as_ref(),
+                "fetch",
+                "--quiet",
+                "origin",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = tx.send(status.map(|s| s.success()).unwrap_or(false));
+    });
+    rx.recv_timeout(timeout).unwrap_or(false)
+}
+
+fn fetch_quiet(dir: &std::path::Path) -> bool {
+    fetch_upstream(dir, std::time::Duration::from_secs(15))
 }
 
 /// Pager choice: config diff_pager > bat > less > cat. Never fails.
@@ -175,5 +209,14 @@ mod tests {
         assert!(clone_dir_for(&cfg, "../evil").is_none());
         assert!(clone_dir_for(&cfg, "a/b").is_none());
         assert!(clone_dir_for(&cfg, "yay").is_some());
+    }
+
+    #[test]
+    fn fetch_upstream_on_non_repo_is_false() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!fetch_upstream(
+            dir.path(),
+            std::time::Duration::from_secs(10)
+        ));
     }
 }

@@ -63,4 +63,6 @@ readonly = false
 news_enabled = true
 news_cache_secs = 86400
 upgrade_noconfirm = false
+clean_keep = 2
+clean_noconfirm = false
 # diff_pager = "auto"

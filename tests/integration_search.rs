@@ -139,3 +139,51 @@ fn readonly_refuses_mutating_ops() {
         );
     }
 }
+
+fn paccache_present() -> bool {
+    std::process::Command::new("which")
+        .arg("paccache")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[test]
+fn help_shows_clean_flags() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--clean"))
+        .stdout(predicate::str::contains("--keep"))
+        .stdout(predicate::str::contains("--dry-run"));
+}
+
+#[test]
+fn clean_dry_run_json_is_valid() {
+    // Needs paccache (pacman-contrib); skip gracefully off-Arch.
+    if !paccache_present() {
+        return;
+    }
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd
+        .args(["--clean", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("clean json valid");
+    assert!(v.get("files").is_some());
+    assert!(v.get("bytes").is_some());
+}
+
+#[test]
+fn readonly_refuses_clean() {
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd
+        .args(["--readonly", "--clean", "--dry-run"])
+        .env("PACSEEK_NOCONFIRM", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

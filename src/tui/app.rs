@@ -45,6 +45,14 @@ impl Mode {
             Mode::Updates => Mode::Search,
         }
     }
+    /// BackTab reverses the cycle (Updates -> Installed -> Search).
+    pub fn toggle_back(self) -> Self {
+        match self {
+            Mode::Search => Mode::Updates,
+            Mode::Installed => Mode::Search,
+            Mode::Updates => Mode::Installed,
+        }
+    }
     pub fn tab_index(self) -> usize {
         match self {
             Mode::Search => 0,
@@ -62,6 +70,7 @@ pub enum Popup {
     ConfirmRemove(Package),
     ConfirmRefresh,
     ConfirmUpgrade,
+    ConfirmClean { files: usize, bytes: u64 },
     Help,
     Message(String),
 }
@@ -87,6 +96,9 @@ pub struct App {
     pub orphans_only: bool,
     /// 0.5.0: raw updates for upgrade-all (display mirrors `packages`).
     pub updates: Vec<crate::updates::PkgUpdate>,
+    /// 5.1: news-intervention warning shown inline in the upgrade popup.
+    /// Set when `U` opens ConfirmUpgrade; cleared on dismiss/confirm.
+    pub upgrade_warn: Option<String>,
     pub limit: usize,
     pub source: Source,
     pub aur_by: AurBy,
@@ -160,6 +172,7 @@ impl App {
             readonly: false,
             orphans_only: false,
             updates: Vec::new(),
+            upgrade_warn: None,
             limit: 50,
             source: Source::All,
             aur_by: AurBy::NameDesc,
@@ -306,13 +319,22 @@ impl App {
     /// Switch Search <-> Installed <-> Updates (Tab). Clears list, restores per-mode hint,
     /// and triggers a fresh search (Installed/Updates with empty filter list all).
     pub fn switch_mode(&mut self) {
+        self.switch_mode_to(self.mode.toggle());
+    }
+
+    /// BackTab: same as Tab but reversed (Updates -> Installed -> Search).
+    pub fn switch_mode_back(&mut self) {
+        self.switch_mode_to(self.mode.toggle_back());
+    }
+
+    fn switch_mode_to(&mut self, next: Mode) {
         // Stash current query per outgoing mode.
         match self.mode {
             Mode::Search => self.last_query_search = self.last_query.clone(),
             Mode::Installed => self.last_query_installed = self.last_query.clone(),
             Mode::Updates => self.last_query_updates = self.last_query.clone(),
         }
-        self.mode = self.mode.toggle();
+        self.mode = next;
         // Restore incoming mode's query.
         self.last_query = match self.mode {
             Mode::Search => self.last_query_search.clone(),
@@ -480,6 +502,7 @@ impl App {
                     match k.code {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             self.popup = Popup::None;
+                            self.upgrade_warn = None;
                         }
                         KeyCode::Char('?') => {
                             // Toggle help
@@ -488,7 +511,7 @@ impl App {
                             }
                         }
                         KeyCode::Enter => {
-                            // Confirm install / remove / refresh / upgrade
+                            // Confirm install / remove / refresh / upgrade / clean
                             match self.popup.clone() {
                                 Popup::Confirm(pkg) => {
                                     self.popup = Popup::None;
@@ -504,7 +527,12 @@ impl App {
                                 }
                                 Popup::ConfirmUpgrade => {
                                     self.popup = Popup::None;
+                                    self.upgrade_warn = None;
                                     self.do_upgrade(terminal)?;
+                                }
+                                Popup::ConfirmClean { files, bytes } => {
+                                    self.popup = Popup::None;
+                                    self.do_clean(files, bytes, terminal)?;
                                 }
                                 _ => {
                                     self.popup = Popup::None;
@@ -526,7 +554,12 @@ impl App {
                             }
                             Popup::ConfirmUpgrade => {
                                 self.popup = Popup::None;
+                                self.upgrade_warn = None;
                                 self.do_upgrade(terminal)?;
+                            }
+                            Popup::ConfirmClean { files, bytes } => {
+                                self.popup = Popup::None;
+                                self.do_clean(files, bytes, terminal)?;
                             }
                             _ => {}
                         },
@@ -544,9 +577,13 @@ impl App {
     fn handle_event(&mut self, ev: &Event, terminal: &mut DefaultTerminal) -> Result<()> {
         match ev {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                // Tab switches Search <-> Installed (remover) from anywhere — never types.
-                KeyCode::Tab | KeyCode::BackTab => {
+                // Tab cycles Search -> Installed -> Updates from anywhere — never types.
+                KeyCode::Tab => {
                     self.switch_mode();
+                }
+                // BackTab reverses the cycle.
+                KeyCode::BackTab => {
+                    self.switch_mode_back();
                 }
                 KeyCode::Char('?') if self.focus == Focus::List && self.popup == Popup::None => {
                     self.popup = Popup::Help;
@@ -604,8 +641,28 @@ impl App {
                         }
                     }
                 }
-                // 0.5.0: U upgrades all (Updates tab or anywhere in list).
-                KeyCode::Char('U') if self.popup == Popup::None && self.focus == Focus::List => {
+                // 5.1: U upgrades all, scoped to Updates tab (in Search/Installed
+                // list it types/filters instead of surprising with an upgrade prompt).
+                // News-intervention warning is fetched once here and rendered
+                // inline in the popup — single step, no second-press dance.
+                KeyCode::Char('U')
+                    if self.mode == Mode::Updates
+                        && self.popup == Popup::None
+                        && self.focus == Focus::List =>
+                {
+                    let news = crate::news::fetch_arch_news(&self.config);
+                    self.upgrade_warn = if crate::news::has_intervention(&news, true) {
+                        Some(
+                            news.iter()
+                                .filter(|i| i.needs_action)
+                                .take(2)
+                                .map(|i| i.title.clone())
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        )
+                    } else {
+                        None
+                    };
                     self.popup = Popup::ConfirmUpgrade;
                 }
                 // 0.5.0: o toggles orphans-only in Installed tab.
@@ -619,6 +676,31 @@ impl App {
                     self.clear_cache();
                     self.is_loading = true;
                     self.trigger_search();
+                }
+                // 5.1: c cleans the package cache (Installed/Updates list).
+                // Preview is a fast local paccache scan; missing paccache is a
+                // message, never a panic.
+                KeyCode::Char('c') | KeyCode::Char('C')
+                    if matches!(self.mode, Mode::Installed | Mode::Updates)
+                        && self.focus == Focus::List
+                        && self.popup == Popup::None =>
+                {
+                    if self.readonly {
+                        self.popup = Popup::Message("Readonly mode — clean disabled".into());
+                    } else {
+                        let keep = self.config.behavior.clean_keep.max(1);
+                        match crate::install::clean::preview_clean(keep) {
+                            Ok(p) => {
+                                self.popup = Popup::ConfirmClean {
+                                    files: p.files,
+                                    bytes: p.bytes,
+                                };
+                            }
+                            Err(e) => {
+                                self.popup = Popup::Message(format!("Cache preview: {e}"));
+                            }
+                        }
+                    }
                 }
                 KeyCode::Delete | KeyCode::Backspace
                     if self.mode == Mode::Installed
@@ -1084,6 +1166,7 @@ impl App {
         self.last_query_installed.clear();
         self.last_query_updates.clear();
         self.clear_cache();
+        crate::updates::invalidate_aur_memo();
         self.dirty = true;
         let should_fetch =
             !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
@@ -1101,26 +1184,8 @@ impl App {
             self.dirty = true;
             return Ok(());
         }
-        // Arch-news guard (fail-open offline): warn inside the flow, still ask.
-        let news = crate::news::fetch_arch_news(&self.config);
-        if crate::news::has_intervention(&news, true) {
-            let titles: Vec<String> = news
-                .iter()
-                .filter(|i| i.needs_action)
-                .take(2)
-                .map(|i| i.title.clone())
-                .collect();
-            self.popup = Popup::Message(format!(
-                "⚠ Manual intervention? {} — press U again to proceed",
-                titles.join("; ")
-            ));
-            self.status = "Upgrade held for news review — press U again".into();
-            self.dirty = true;
-            // Second U press proceeds (popup Message dismisses first).
-            // To keep it simple: require explicit re-confirm via ConfirmUpgrade
-            // re-open — caller presses U again after reading.
-            return Ok(());
-        }
+        // 5.1: news warning already surfaced inline in the popup (set on `U`);
+        // confirming here means the user read it — proceed directly.
         let cfg = self.config.clone();
         let res = super::super::tui::suspend_and_run(terminal, move || {
             crate::install::upgrade::upgrade_system(&cfg)
@@ -1133,6 +1198,45 @@ impl App {
             Err(e) => {
                 self.status = format!("Upgrade failed: {e}");
                 self.popup = Popup::Message(format!("✗ Upgrade failed: {e}"));
+            }
+        }
+        self.last_query.clear();
+        self.last_query_search.clear();
+        self.last_query_installed.clear();
+        self.last_query_updates.clear();
+        self.clear_cache();
+        crate::updates::invalidate_aur_memo();
+        self.dirty = true;
+        let should_fetch =
+            !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
+        if should_fetch {
+            self.is_loading = true;
+            self.trigger_search();
+        }
+        Ok(())
+    }
+
+    fn do_clean(&mut self, files: usize, bytes: u64, terminal: &mut DefaultTerminal) -> Result<()> {
+        if self.readonly {
+            self.popup = Popup::Message("Readonly mode — clean disabled".into());
+            self.status = "Refused clean: readonly mode".into();
+            self.dirty = true;
+            return Ok(());
+        }
+        let keep = self.config.behavior.clean_keep.max(1);
+        let cfg = self.config.clone();
+        let res = super::super::tui::suspend_and_run(terminal, move || {
+            crate::install::clean::run_clean(&cfg, keep)
+        });
+        match res {
+            Ok(()) => {
+                let size = crate::stats::human_bytes(bytes);
+                self.status = format!("Cleaned {files} files ({size})");
+                self.popup = Popup::Message(format!("✓ Cleaned {files} files ({size})"));
+            }
+            Err(e) => {
+                self.status = format!("Clean failed: {e}");
+                self.popup = Popup::Message(format!("✗ Clean failed: {e}"));
             }
         }
         self.last_query.clear();
@@ -1287,6 +1391,9 @@ mod tests {
             orphans: false,
             stats: false,
             upgrade: false,
+            clean: false,
+            keep: 2,
+            dry_run: false,
             readonly: false,
         };
         let app = App::new_with_cli("test".into(), &cli);
@@ -1580,8 +1687,9 @@ mod tests {
     }
 
     #[test]
-    fn u_in_list_opens_confirm_upgrade() {
+    fn u_in_updates_opens_confirm_upgrade() {
         let mut app = App::new("".into());
+        app.mode = Mode::Updates;
         app.focus = Focus::List;
         let ev = Event::Key(crossterm::event::KeyEvent::new(
             KeyCode::Char('U'),
@@ -1591,6 +1699,68 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let _ = app.handle_event(&ev, &mut terminal);
         assert_eq!(app.popup, Popup::ConfirmUpgrade);
+    }
+
+    #[test]
+    fn u_in_search_types_instead_of_upgrade() {
+        // 5.1 scoping: U outside Updates must not pop an upgrade prompt.
+        let mut app = App::new("".into());
+        app.mode = Mode::Search;
+        app.focus = Focus::List;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('U'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_ne!(app.popup, Popup::ConfirmUpgrade);
+        // Falls through to list-typing: focus jumps to search with U typed.
+        assert_eq!(app.focus, Focus::Search);
+    }
+
+    #[test]
+    fn backtab_reverses_tab_cycle() {
+        let mut app = App::new("".into());
+        assert_eq!(app.mode, Mode::Search);
+        app.switch_mode_back();
+        assert_eq!(app.mode, Mode::Updates);
+        app.switch_mode_back();
+        assert_eq!(app.mode, Mode::Installed);
+        app.switch_mode_back();
+        assert_eq!(app.mode, Mode::Search);
+    }
+
+    #[test]
+    fn backtab_key_event_reverses_mode() {
+        let mut app = App::new("".into());
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::BackTab,
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        assert_eq!(app.mode, Mode::Updates);
+    }
+
+    #[test]
+    fn c_in_installed_opens_clean_or_hint() {
+        let mut app = App::new("".into());
+        app.mode = Mode::Installed;
+        app.focus = Focus::List;
+        let ev = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::empty(),
+        ));
+        let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let _ = app.handle_event(&ev, &mut terminal);
+        // paccache present → ConfirmClean; absent (off-Arch CI) → Message hint.
+        assert!(
+            matches!(app.popup, Popup::ConfirmClean { .. } | Popup::Message(_)),
+            "c should open clean confirm or a missing-tool hint"
+        );
     }
 
     #[test]

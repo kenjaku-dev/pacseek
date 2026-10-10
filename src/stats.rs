@@ -66,13 +66,28 @@ fn count_reasons() -> (usize, usize) {
 }
 
 fn dir_size(path: &str) -> u64 {
-    let mut total = 0u64;
+    dir_size_recursive(std::path::Path::new(path), 0)
+}
+
+/// Recursive cache size with a depth cap and no symlink following:
+/// pacman/pacseek caches can hold symlinks; following them risks cycles
+/// and double counting. Errors (permissions, races) are skipped, never fatal.
+fn dir_size_recursive(path: &std::path::Path, depth: usize) -> u64 {
+    if depth > 8 {
+        return 0;
+    }
     let Ok(rd) = std::fs::read_dir(path) else {
         return 0;
     };
+    let mut total = 0u64;
     for entry in rd.flatten() {
-        if let Ok(meta) = entry.metadata() {
-            total = total.saturating_add(meta.len());
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if ft.is_dir() {
+            total = total.saturating_add(dir_size_recursive(&entry.path(), depth + 1));
+        } else if ft.is_file() {
+            total = total.saturating_add(entry.metadata().map(|m| m.len()).unwrap_or(0));
         }
     }
     total

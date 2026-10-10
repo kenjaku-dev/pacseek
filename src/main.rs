@@ -196,6 +196,70 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 5.1 --clean fast path: live paccache preview, then confirm + run.
+    // Preview is always live (never cached); missing paccache exits 1 with
+    // an install hint, refusals exit 2 like the other mutating paths.
+    if cli.clean {
+        if readonly {
+            eprintln!(
+                "refusing to clean: readonly mode is enabled (--readonly / [behavior] readonly)"
+            );
+            std::process::exit(2);
+        }
+        if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+            colored::control::set_override(false);
+        }
+        let keep = cfg.effective_keep(cli.keep);
+        let preview = match pacseek::install::clean::preview_clean(keep) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("clean failed: {}", e);
+                std::process::exit(1);
+            }
+        };
+        if cli.dry_run || cli.json {
+            pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
+            return Ok(());
+        }
+        if preview.files == 0 {
+            pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
+            return Ok(());
+        }
+        let noconfirm = cfg.clean_noconfirm();
+        if should_confirm(noconfirm, std::io::stdin().is_terminal()) {
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut output = std::io::stderr();
+            let size = pacseek::stats::human_bytes(preview.bytes);
+            if !confirm_prompt(
+                &format!(
+                    "Remove {} cached files ({})? [keep {}]",
+                    preview.files, size, keep
+                ),
+                &mut input,
+                &mut output,
+            ) {
+                eprintln!("cancelled");
+                return Ok(());
+            }
+        } else if !noconfirm {
+            eprintln!(
+                "refusing to clean without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+            );
+            std::process::exit(2);
+        }
+        match pacseek::install::clean::run_clean(&cfg, keep) {
+            Ok(()) => {
+                pacseek::output::print_clean(&preview, false, cli.json, cli.no_color)?;
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("clean failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI.
     // Destructive: confirm on TTY unless noconfirm; refuse silently-piped runs.
     if let Some(name) = cli.remove.clone() {

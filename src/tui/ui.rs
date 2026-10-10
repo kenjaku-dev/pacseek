@@ -74,6 +74,9 @@ pub fn draw(f: &mut Frame, app: &App) {
         Popup::ConfirmRemove(pkg) => draw_confirm_remove_popup(f, pkg, area, app),
         Popup::ConfirmRefresh => draw_confirm_refresh_popup(f, area, app),
         Popup::ConfirmUpgrade => draw_confirm_upgrade_popup(f, area, app),
+        Popup::ConfirmClean { files, bytes } => {
+            draw_confirm_clean_popup(f, *files, *bytes, area, app)
+        }
         Popup::Help => draw_help_popup(f, area, app),
         Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
@@ -402,13 +405,13 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             " Enter:filter o:orphans F5:refresh Esc:list Tab:updates ?:help Ctrl+C:quit "
         }
         (Mode::Installed, Focus::List) => {
-            " ↑↓/j k:move Enter/d:remove o:orphans i:info r/F5:refresh /:filter Tab:updates ?:help q:quit "
+            " ↑↓/j k:move Enter/d:remove o:orphans c:clean i:info r/F5:refresh /:filter Tab:updates ?:help q:quit "
         }
         (Mode::Updates, Focus::Search) => {
             " Enter:filter U:upgrade-all F5:refresh Esc:list Tab:search ?:help Ctrl+C:quit "
         }
         (Mode::Updates, Focus::List) => {
-            " ↑↓/j k:move Enter:upgrade-one U:upgrade-all i:info F5:refresh /:filter Tab:search ?:help q:quit "
+            " ↑↓/j k:move Enter:upgrade-one U:upgrade-all c:clean i:info F5:refresh /:filter Tab:search ?:help q:quit "
         }
     };
     let p = Paragraph::new(help)
@@ -783,8 +786,92 @@ fn draw_confirm_upgrade_popup(f: &mut Frame, area: Rect, app: &App) {
         });
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
+    let mut text = vec![Line::from("Upgrade full system?"), Line::raw("")];
+    // 5.1: news-intervention warning inline — the single-step replacement
+    // for the old press-U-twice dance.
+    if let Some(warn) = app.upgrade_warn.as_deref().filter(|w| !w.trim().is_empty()) {
+        text.push(Line::from(vec![Span::styled(
+            format!("Manual intervention? {warn}"),
+            if app.no_color {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                app.styles.out_of_date
+            },
+        )]));
+        text.push(Line::raw(""));
+    }
+    text.extend([
+        Line::from(vec![
+            Span::styled(
+                "Y",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.installed
+                },
+            ),
+            Span::raw("/Enter = yes  "),
+            Span::styled(
+                "N/Esc",
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.out_of_date
+                },
+            ),
+            Span::raw(" = cancel"),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Will run: sudo pacman -Syu [needs password]",
+            if app.no_color {
+                Style::default()
+            } else {
+                app.styles.text_dim
+            },
+        )),
+    ]);
+    let p = Paragraph::new(text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(Wrap { trim: true });
+    f.render_widget(p, inner);
+}
+
+fn draw_confirm_clean_popup(f: &mut Frame, files: usize, bytes: u64, area: Rect, app: &App) {
+    // ui-design: one focal number (reclaimable size), one primary CTA.
+    let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
+    let popup_area = centered_rect(sz[0], sz[1], area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Confirm clean ")
+        .borders(Borders::ALL)
+        .border_type(app.border_type)
+        .border_style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_title
+        })
+        .style(if app.no_color {
+            Style::default()
+        } else {
+            app.styles.popup_bg
+        });
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    let size = crate::stats::human_bytes(bytes);
     let text = vec![
-        Line::from("Upgrade full system?"),
+        Line::from(vec![
+            Span::raw("Remove "),
+            Span::styled(
+                format!("{files} cached files ({size})"),
+                if app.no_color {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    app.styles.installed
+                },
+            ),
+            Span::raw(" ?"),
+        ]),
         Line::raw(""),
         Line::from(vec![
             Span::styled(
@@ -808,7 +895,7 @@ fn draw_confirm_upgrade_popup(f: &mut Frame, area: Rect, app: &App) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Will run: sudo pacman -Syu [needs password] + news guard",
+            "Will run: sudo paccache -r -kN [needs password]",
             if app.no_color {
                 Style::default()
             } else {
@@ -843,31 +930,16 @@ fn draw_help_popup(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     let lines = vec![
-        Line::from("Tab / Shift+Tab : cycle Search -> Installed -> Updates"),
-        Line::from("F5 / Ctrl+R     : refresh sync DBs (confirm, anywhere)"),
+        Line::from("Tab / BackTab : cycle Search -> Installed -> Updates"),
+        Line::from("F5 / Ctrl+R   : refresh sync DBs (confirm, anywhere)"),
         Line::from(""),
-        Line::from("Search mode:"),
-        Line::from("  type + Enter  : search repo+AUR"),
-        Line::from("  ↑↓ / j k      : navigate"),
-        Line::from("  Enter         : install selected"),
-        Line::from("  i             : package info + deps (in list)"),
-        Line::from("  r             : refresh (in list; F5 works while typing)"),
-        Line::from(""),
-        Line::from("Installed mode:"),
-        Line::from("  type + Enter  : filter installed"),
-        Line::from("  ↑↓ / j k      : navigate"),
-        Line::from("  Enter / d / x : remove selected"),
-        Line::from("  o             : toggle orphans-only (Qdt)"),
-        Line::from("  i             : package info + deps (in list)"),
-        Line::from("  r             : refresh (in list; F5 works while typing)"),
-        Line::from(""),
-        Line::from("Updates mode:"),
-        Line::from("  type + Enter  : filter updates"),
-        Line::from("  Enter         : upgrade single package"),
-        Line::from("  U             : upgrade all (sudo pacman -Syu, news-guarded)"),
-        Line::from("  i             : package info (in list)"),
-        Line::from(""),
-        Line::from("Global: / focus search, Esc focus toggle, ? help, q quit (in list)"),
+        Line::from("Search    : type+Enter search, ↑↓ move, Enter install,"),
+        Line::from("              i info+deps, r refresh (list)"),
+        Line::from("Installed : filter, Enter/d/x remove, o orphans-only,"),
+        Line::from("              c clean cache, i info, r refresh (list)"),
+        Line::from("Updates   : filter, Enter upgrade-one, U upgrade-all,"),
+        Line::from("              c clean cache, i info"),
+        Line::from("Global    : / search, Esc toggle, ? help, q quit (list)"),
         Line::from(""),
         Line::from("Press Esc/q/Enter/? to close"),
     ];
