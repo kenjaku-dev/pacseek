@@ -297,16 +297,14 @@ pub fn search_local_with_config(
 /// Fallback for Remover mode when ALPM fails — parses `pacman -Q` output.
 /// `pacman -Q` has no descriptions, so regex (when enabled) matches the
 /// package name only — same recall contract as the ALPM path's name match.
+/// Bounded (perf P2): timeout surfaces as Err like a spawn failure.
 pub fn search_local_fallback(
     query: &str,
     limit: usize,
     use_regex: bool,
 ) -> anyhow::Result<Vec<Package>> {
-    use std::process::Command;
-    let output = Command::new("pacman")
-        .args(["-Q"])
-        .output()
-        .map_err(|e| anyhow::anyhow!("failed to run pacman -Q: {e}"))?;
+    let output = crate::process::output_bounded("pacman", &["-Q"], crate::process::QUICK_TIMEOUT)
+        .ok_or_else(|| anyhow::anyhow!("pacman -Q timed out or failed to run"))?;
     if !output.status.success() {
         return Ok(vec![]);
     }
@@ -365,13 +363,20 @@ pub fn search_local_fallback(
 }
 
 // Fallback when alpm fails — parses `pacman -Ss` output ( Butter fallback )
-// Handles wrapped descriptions (multiple lines) and distinguishes no-results vs error
+// Handles wrapped descriptions (multiple lines) and distinguishes no-results vs error.
+// Bounded (perf P2): timeout degrades to empty like a no-results run.
 pub fn search_repo_fallback(query: &str, limit: usize) -> anyhow::Result<Vec<Package>> {
-    use std::process::Command;
-    let output = Command::new("pacman")
-        .args(["-Ss", query])
-        .output()
-        .map_err(|e| anyhow::anyhow!("failed to run pacman -Ss: {e}"))?;
+    let output = match crate::process::output_bounded(
+        "pacman",
+        &["-Ss", query],
+        crate::process::NETWORK_TIMEOUT,
+    ) {
+        Some(o) => o,
+        None => {
+            tracing::warn!("pacman -Ss timed out or failed to run");
+            return Ok(vec![]);
+        }
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // pacman -Ss returns 1 when no results, but also on error; check stderr for real errors

@@ -75,11 +75,13 @@ pub fn list_orphans_with_config(cfg: &pacmanconf::Config) -> anyhow::Result<Vec<
 }
 
 /// Fallback when ALPM unavailable — parses `pacman -Qdt` (names only).
+/// Bounded (perf P2): timeout degrades to empty, never hangs the caller.
 pub fn list_orphans_fallback() -> anyhow::Result<Vec<Package>> {
-    let output = std::process::Command::new("pacman")
-        .args(["-Qdt"])
-        .output()
-        .map_err(|e| anyhow::anyhow!("pacman -Qdt failed: {e}"))?;
+    let output =
+        match crate::process::output_bounded("pacman", &["-Qdt"], crate::process::QUICK_TIMEOUT) {
+            Some(o) => o,
+            None => return Ok(vec![]),
+        };
     if !output.status.success() {
         return Ok(vec![]);
     }

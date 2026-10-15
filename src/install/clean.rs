@@ -95,18 +95,19 @@ pub fn parse_dryrun(output: &str, keep: u32) -> CleanPreview {
 
 /// Live preview via `paccache -d -kN`. Missing paccache or spawn failure is
 /// an error with an install hint (caller maps to exit 1, not a panic).
+/// Bounded (perf P2): a stuck paccache fails instead of hanging the caller.
 pub fn preview_clean(keep: u32) -> anyhow::Result<CleanPreview> {
     if !has_paccache() {
         anyhow::bail!("paccache not found — install pacman-contrib to clean the cache");
     }
     let args = clean_command_args(keep, true);
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let mut full: Vec<String> = args;
+    full.push("-v".to_string());
+    let arg_refs: Vec<&str> = full.iter().map(|s| s.as_str()).collect();
     // Verbose lists candidates so the count is exact even if the trailer drifts.
-    let output = Command::new("paccache")
-        .args(&arg_refs)
-        .arg("-v")
-        .output()
-        .context("failed to run paccache dry run")?;
+    let output =
+        crate::process::output_bounded("paccache", &arg_refs, crate::process::NETWORK_TIMEOUT)
+            .context("paccache dry run timed out or failed to run")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_dryrun(&stdout, keep.max(1)))
 }

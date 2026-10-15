@@ -135,22 +135,15 @@ pub fn list_installed() -> anyhow::Result<Vec<Package>> {
     }
 }
 
-/// Run flatpak with a wall-clock bound. std has no Command timeout, so park
-/// the wait on a thread and bound the recv (`resilience-failure`: unbounded
-/// waits hang TUI workers). None covers timeout/spawn failure (fail-open).
+/// Run flatpak with a wall-clock bound via the shared runner (perf P2).
+/// None covers timeout/spawn failure (fail-open); only successful stdout
+/// is returned.
 fn run_flatpak(args: &[&str], timeout: Duration) -> Option<String> {
-    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
-        let out = Command::new("flatpak").args(&refs).output();
-        let text = out
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-        let _ = tx.send(text);
-    });
-    rx.recv_timeout(timeout).ok().flatten()
+    let out = crate::process::output_bounded("flatpak", args, timeout)?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Parse `flatpak list --app --json`. Defensive: garbage -> empty, rows without
@@ -309,17 +302,9 @@ pub fn is_flatpak_installed(id: &str) -> bool {
     if !has_flatpak() || validate_app_id(id).is_err() {
         return false;
     }
-    let id_owned = id.trim().to_string();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let ok = Command::new("flatpak")
-            .args(["info", id_owned.as_str()])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let _ = tx.send(ok);
-    });
-    rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false)
+    crate::process::output_bounded("flatpak", &["info", id.trim()], Duration::from_secs(10))
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Install a flatpak app with inherited stdio so the user sees progress.
@@ -600,26 +585,15 @@ pub fn parse_remote_info_version(text: &str) -> Option<String> {
 /// `flatpak remote-info --<scope> <origin> <id>`. None covers disabled
 /// remotes, timeouts, missing refs — all fail-open skips.
 fn remote_version(app_id: &str, origin: &str, scope: &str, timeout: Duration) -> Option<String> {
-    let id_owned = app_id.to_string();
-    let origin_owned = origin.to_string();
-    let scope_owned = scope.to_string();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let out = Command::new("flatpak")
-            .args([
-                "remote-info",
-                scope_owned.as_str(),
-                origin_owned.as_str(),
-                id_owned.as_str(),
-            ])
-            .output();
-        let text = out
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-        let _ = tx.send(text.and_then(|t| parse_remote_info_version(&t)));
-    });
-    rx.recv_timeout(timeout).ok().flatten()
+    let out = crate::process::output_bounded(
+        "flatpak",
+        &["remote-info", scope, origin, app_id],
+        timeout,
+    )?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_remote_info_version(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// Available flatpak updates: installed version vs remote `Version:`.

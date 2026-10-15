@@ -75,30 +75,32 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
     }
     let clone_dir = cache_base.join(safe_name);
 
-    // Clone or pull
+    // Clone or pull. Bounded (perf P2): bulk transfer gets a long budget,
+    // but a dead network still fails instead of hanging forever.
+    // User watches progress via inherited stdio; Ctrl-C still works.
     if clone_dir.exists() {
         eprintln!("Updating existing clone {} ...", clone_dir.display());
-        let status = Command::new("git")
-            .args(["-C", &clone_dir.to_string_lossy(), "pull", "--ff-only"])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .context("git pull")?;
-        if !status.success() {
+        let pulled = crate::process::status_inherit_bounded(
+            "git",
+            &["-C", &clone_dir.to_string_lossy(), "pull", "--ff-only"],
+            crate::process::CLONE_TIMEOUT,
+        )
+        .map(|s| s.success())
+        .unwrap_or(false);
+        if !pulled {
             eprintln!("git pull failed, continuing with existing clone...");
         }
     } else {
         let url = format!("https://aur.archlinux.org/{}.git", name);
         eprintln!("Cloning {} ...", url);
-        let status = Command::new("git")
-            .args(["clone", &url, &clone_dir.to_string_lossy()])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .context("git clone")?;
-        if !status.success() {
+        let cloned = crate::process::status_inherit_bounded(
+            "git",
+            &["clone", &url, &clone_dir.to_string_lossy()],
+            crate::process::CLONE_TIMEOUT,
+        )
+        .map(|s| s.success())
+        .unwrap_or(false);
+        if !cloned {
             anyhow::bail!("git clone failed for {}", url);
         }
     }

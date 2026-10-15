@@ -21,23 +21,22 @@ pub fn remove_package_with_config(name: &str, cfg: &Config) -> anyhow::Result<()
         anyhow::bail!("invalid package name: {:?}", name);
     }
 
-    // Must be installed, otherwise `pacman -Rs` errors confusingly
-    let q = Command::new("pacman")
-        .args(["-Q", name])
-        .output()
+    // Must be installed, otherwise `pacman -Rs` errors confusingly.
+    // Bounded (perf P2): a stuck pacman fails closed here, never hangs TUI.
+    let q = crate::process::output_bounded("pacman", &["-Q", name], crate::process::QUICK_TIMEOUT)
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !q {
         anyhow::bail!("package '{}' is not installed (pacman -Q failed)", name);
     }
 
-    // Preview: show `pacman -Qi` so user sees size, deps, required-by
-    let _ = Command::new("pacman")
-        .args(["-Qi", name])
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status();
+    // Preview: show `pacman -Qi` so user sees size, deps, required-by.
+    // Best-effort within a bound; a timeout skips the preview, not the flow.
+    let _ = crate::process::status_inherit_bounded(
+        "pacman",
+        &["-Qi", name],
+        crate::process::QUICK_TIMEOUT,
+    );
 
     let flag = cfg.remove_flag_arg();
     let mut cmd = Command::new("sudo");

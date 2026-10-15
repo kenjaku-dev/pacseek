@@ -14,12 +14,12 @@ pub fn install_repo_package(name: &str) -> anyhow::Result<()> {
         anyhow::bail!("invalid package name: {:?}", name);
     }
 
-    // Check if already installed via pacman -Q (optional, just info)
-    let already = Command::new("pacman")
-        .args(["-Q", name])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    // Check if already installed via pacman -Q (optional, just info).
+    // Bounded (perf P2): None (stuck/missing) reads as "not installed".
+    let already =
+        crate::process::output_bounded("pacman", &["-Q", name], crate::process::QUICK_TIMEOUT)
+            .map(|o| o.status.success())
+            .unwrap_or(false);
     if already {
         eprintln!("Package {} already installed, reinstalling...", name);
     }
