@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// System health snapshot for `--stats` and the Updates-tab header.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SysStats {
     pub explicit: usize,
     pub dependencies: usize,

@@ -121,9 +121,13 @@ async fn main() -> anyhow::Result<()> {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let repo = {
+        // Perf P3: repo check joins the async fan-out instead of blocking it.
+        let repo_fut = async {
             let timer = pacseek::timing::start("repo-updates");
-            let out = pacseek::updates::check_repo_updates().unwrap_or_default();
+            let out =
+                task::spawn_blocking(|| pacseek::updates::check_repo_updates().unwrap_or_default())
+                    .await
+                    .unwrap_or_default();
             timer.finish(out.len());
             out
         };
@@ -133,22 +137,34 @@ async fn main() -> anyhow::Result<()> {
             .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
             .build();
-        let mut all = repo;
+        let mut all = Vec::new();
         if let Ok(client) = client {
-            let timer = pacseek::timing::start("aur-updates");
-            let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
-            timer.finish(aur.len());
-            all.extend(aur);
-        }
-        // Flatpak updates via remote-info (fail-open empty when disabled/offline).
-        let cfg_fp = cfg.clone();
-        let timer = pacseek::timing::start("flatpak-updates");
-        let flatpak =
-            task::spawn_blocking(move || pacseek::sources::check_flatpak_updates_cached(&cfg_fp))
+            let aur_fut = async {
+                let timer = pacseek::timing::start("aur-updates");
+                let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+                timer.finish(aur.len());
+                aur
+            };
+            // Flatpak updates via remote-info (fail-open empty when disabled/offline).
+            let cfg_fp = cfg.clone();
+            let fp_fut = async {
+                let timer = pacseek::timing::start("flatpak-updates");
+                let out = task::spawn_blocking(move || {
+                    pacseek::sources::check_flatpak_updates_cached(&cfg_fp)
+                })
                 .await
                 .unwrap_or_default();
-        timer.finish(flatpak.len());
-        all.extend(flatpak);
+                timer.finish(out.len());
+                out
+            };
+            let (repo, aur, flatpak) = tokio::join!(repo_fut, aur_fut, fp_fut);
+            all.extend(repo);
+            all.extend(aur);
+            all.extend(flatpak);
+        } else {
+            // No HTTP client (TLS init failure): still report repo results.
+            all.extend(repo_fut.await);
+        }
         all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         pacseek::output::print_updates(&all, cli.json, cli.no_color)?;
         return Ok(());
@@ -167,43 +183,66 @@ async fn main() -> anyhow::Result<()> {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let mut stats = {
+        // Perf P3: all four probes run concurrently; the flatpak branch lists
+        // once and reuses the list for the updates check (single scan).
+        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
+        let client = reqwest::Client::builder()
+            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(timeout)
+            .build();
+        let local_fut = async {
             let timer = pacseek::timing::start("local-stats");
-            let out = pacseek::stats::gather_local_stats();
+            let out = match task::spawn_blocking(pacseek::stats::gather_local_stats).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(err=?e, "spawn_blocking JoinError (local stats panicked)");
+                    pacseek::stats::SysStats::default()
+                }
+            };
             timer.finish(out.explicit.saturating_add(out.dependencies));
             out
         };
-        // Best-effort AUR update count (offline -> 0, never fatal).
-        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
-        if let Ok(client) = reqwest::Client::builder()
-            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(timeout)
-            .build()
-        {
+        let aur_fut = async {
             let timer = pacseek::timing::start("aur-updates");
-            let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
-            timer.finish(aur.len());
-            stats.updates_aur = aur.len();
-        }
-        // Best-effort flatpak inventory + updates (absent/disabled -> 0).
-        if cfg.flatpak_enabled() {
-            let timer = pacseek::timing::start("flatpak-list");
-            if let Ok(list) = task::spawn_blocking(pacseek::sources::list_installed).await {
-                let list = list.unwrap_or_default();
-                timer.finish(list.len());
-                stats.flatpak_installed = list.len();
+            let out = match client {
+                Ok(client) => pacseek::updates::check_aur_updates(&client, &cfg).await,
+                Err(_) => vec![],
+            };
+            timer.finish(out.len());
+            out.len()
+        };
+        let cfg_fp = cfg.clone();
+        let fp_fut = async move {
+            if !cfg_fp.flatpak_enabled() {
+                return (0usize, 0usize);
             }
-            let cfg_fp2 = cfg.clone();
+            let timer = pacseek::timing::start("flatpak-list");
+            let listed = match task::spawn_blocking(pacseek::sources::list_installed).await {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => {
+                    tracing::warn!(err=?e, "flatpak list failed");
+                    vec![]
+                }
+                Err(e) => {
+                    tracing::error!(err=?e, "spawn_blocking JoinError (flatpak list panicked)");
+                    vec![]
+                }
+            };
+            timer.finish(listed.len());
+            let n_listed = listed.len();
             let timer = pacseek::timing::start("flatpak-updates");
-            if let Ok(up) = task::spawn_blocking(move || {
-                pacseek::sources::check_flatpak_updates_cached(&cfg_fp2)
+            let up = task::spawn_blocking(move || {
+                pacseek::sources::check_flatpak_updates_cached_for(&listed, &cfg_fp)
             })
             .await
-            {
-                timer.finish(up.len());
-                stats.updates_flatpak = up.len();
-            }
-        }
+            .unwrap_or_default();
+            timer.finish(up.len());
+            (n_listed, up.len())
+        };
+        let (mut stats, aur_n, (fp_n, fp_up)) = tokio::join!(local_fut, aur_fut, fp_fut);
+        stats.updates_aur = aur_n;
+        stats.flatpak_installed = fp_n;
+        stats.updates_flatpak = fp_up;
         pacseek::output::print_stats(&stats, cli.json, cli.no_color)?;
         return Ok(());
     }

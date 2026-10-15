@@ -874,19 +874,50 @@ impl App {
             let (tx, rx) = mpsc::channel();
             self.search_rx = Some(rx);
             thread::spawn(move || {
-                // P1 perf: per-backend timings for the serial update checks.
-                let timer = crate::timing::start("tui-repo-updates");
-                let mut all = crate::updates::check_repo_updates().unwrap_or_default();
-                timer.finish(all.len());
-                let timer = crate::timing::start("tui-aur-updates");
-                let aur = crate::updates::check_aur_updates_blocking(&cfg);
-                timer.finish(aur.len());
-                all.extend(aur);
-                // Flatpak via remote-info memo (fail-open empty when disabled).
-                let timer = crate::timing::start("tui-flatpak-updates");
-                let fp = crate::sources::check_flatpak_updates_cached(&cfg);
-                timer.finish(fp.len());
-                all.extend(fp);
+                // Perf P3: repo/AUR/flatpak checks run on parallel threads
+                // (mirror of the search fan-out); joins carry panic guards.
+                // Timings live inside each thread for true per-backend latency.
+                let repo_h = std::thread::spawn(|| {
+                    let timer = crate::timing::start("tui-repo-updates");
+                    let out = crate::updates::check_repo_updates().unwrap_or_default();
+                    timer.finish(out.len());
+                    out
+                });
+                let cfg_a = cfg.clone();
+                let aur_h = std::thread::spawn(move || {
+                    let timer = crate::timing::start("tui-aur-updates");
+                    let out = crate::updates::check_aur_updates_blocking(&cfg_a);
+                    timer.finish(out.len());
+                    out
+                });
+                let cfg_f = cfg.clone();
+                let fp_h = std::thread::spawn(move || {
+                    let timer = crate::timing::start("tui-flatpak-updates");
+                    let out = crate::sources::check_flatpak_updates_cached(&cfg_f);
+                    timer.finish(out.len());
+                    out
+                });
+                let mut all = match repo_h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("repo updates worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                };
+                all.extend(match aur_h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("aur updates worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                });
+                all.extend(match fp_h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("flatpak updates worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                });
                 all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
                 // Filter by input (name substring, or regex when enabled).
                 let filtered: Vec<crate::updates::PkgUpdate> = if query_clone.is_empty() {

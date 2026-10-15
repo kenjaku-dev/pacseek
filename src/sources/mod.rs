@@ -8,10 +8,11 @@
 pub mod flatpak;
 
 pub use flatpak::{
-    FlatpakBackend, check_flatpak_updates_cached, check_flatpak_updates_with_config,
-    clean_unused_flatpak, has_flatpak, install_flatpak_package, invalidate_flatpak_memo,
-    is_flatpak_installed, list_installed, remove_flatpak_package, search_flatpak_with_config,
-    update_all_flatpak, update_flatpak_package, validate_app_id,
+    FlatpakBackend, check_flatpak_updates_cached, check_flatpak_updates_cached_for,
+    check_flatpak_updates_for, check_flatpak_updates_with_config, clean_unused_flatpak,
+    has_flatpak, install_flatpak_package, invalidate_flatpak_memo, is_flatpak_installed,
+    list_installed, remove_flatpak_package, search_flatpak_with_config, update_all_flatpak,
+    update_flatpak_package, validate_app_id,
 };
 
 use crate::model::Package;

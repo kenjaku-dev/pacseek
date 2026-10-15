@@ -608,46 +608,101 @@ pub fn check_flatpak_updates_with_config(
         return vec![];
     }
     let installed = list_installed().unwrap_or_default();
-    if installed.is_empty() {
+    check_flatpak_updates_for(&installed, cfg)
+}
+
+/// Same check over a pre-fetched installed list (perf P3: `--stats` lists
+/// once and reuses it here instead of spawning `flatpak list` twice).
+/// Takes the list as granted; enablement/binary still gated.
+pub fn check_flatpak_updates_for(
+    installed: &[Package],
+    cfg: &crate::config::Config,
+) -> Vec<crate::updates::PkgUpdate> {
+    if !cfg.flatpak_enabled() || !has_flatpak() || installed.is_empty() {
         return vec![];
     }
     let timeout = Duration::from_secs(cfg.search.timeout_secs.max(1));
-    let mut out = Vec::new();
-    for pkg in &installed {
-        // Strip the non-stable branch suffix the list parser appends
-        // ("1.0 (beta)") — remote-info versions carry no branch.
-        let local = pkg.version.split(" (").next().unwrap_or("").trim();
-        if local.is_empty() || local == "?" {
-            continue;
+    // Perf P3: fixed 4-way split over scoped threads (each thread blocks on
+    // its own remote-info spawns; 6 apps ≈ 3s serial → <1.5s here).
+    let per_chunk = installed.len().div_ceil(4).max(1);
+    let out: Vec<crate::updates::PkgUpdate> = std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for chunk in installed.chunks(per_chunk) {
+            handles.push(s.spawn(move || {
+                let mut out = Vec::new();
+                for pkg in chunk {
+                    if let Some(u) = check_one_app(pkg, timeout) {
+                        out.push(u);
+                    }
+                }
+                out
+            }));
         }
-        let origin = pkg
-            .url
-            .as_deref()
-            .and_then(|u| u.strip_prefix("flatpak:"))
-            .unwrap_or("flathub");
-        let remote = remote_version(&pkg.name, origin, "--system", timeout)
-            .or_else(|| remote_version(&pkg.name, origin, "--user", timeout));
-        if let Some(rv) = remote {
-            let rv = rv.trim().to_string();
-            if !rv.is_empty() && rv != local {
-                out.push(crate::updates::PkgUpdate {
-                    name: pkg.name.clone(),
-                    old_version: local.to_string(),
-                    new_version: rv,
-                    repo: "flatpak".to_string(),
-                    out_of_date: false,
-                });
-            }
-        }
-    }
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+    let mut out = out;
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+/// One app's update, if any. Pure-ish probe: None covers every skip/failure.
+fn check_one_app(pkg: &Package, timeout: Duration) -> Option<crate::updates::PkgUpdate> {
+    // Strip the non-stable branch suffix the list parser appends
+    // ("1.0 (beta)") — remote-info versions carry no branch.
+    let local = pkg.version.split(" (").next().unwrap_or("").trim();
+    if local.is_empty() || local == "?" {
+        return None;
+    }
+    let origin = pkg
+        .url
+        .as_deref()
+        .and_then(|u| u.strip_prefix("flatpak:"))
+        .unwrap_or("flathub");
+    let remote = remote_version(&pkg.name, origin, "--system", timeout)
+        .or_else(|| remote_version(&pkg.name, origin, "--user", timeout))?;
+    let rv = remote.trim();
+    if rv.is_empty() || rv == local {
+        return None;
+    }
+    Some(crate::updates::PkgUpdate {
+        name: pkg.name.clone(),
+        old_version: local.to_string(),
+        new_version: rv.to_string(),
+        repo: "flatpak".to_string(),
+        out_of_date: false,
+    })
 }
 
 /// Memoized updates (`caching`: TTL + explicit invalidate). Remote-info is one
 /// spawn per app, so Tab-switching within the TTL reuses the last check;
 /// F5/upgrade paths call `invalidate_flatpak_memo()` for a fresh check.
 pub fn check_flatpak_updates_cached(cfg: &crate::config::Config) -> Vec<crate::updates::PkgUpdate> {
+    if let Some(hit) = memo_get() {
+        return hit;
+    }
+    let fresh = check_flatpak_updates_with_config(cfg);
+    memo_store(fresh.clone());
+    fresh
+}
+
+/// Memoized check over a pre-fetched installed list (perf P3: `--stats`
+/// lists once, then reuses the list here — one `flatpak list` total).
+pub fn check_flatpak_updates_cached_for(
+    installed: &[Package],
+    cfg: &crate::config::Config,
+) -> Vec<crate::updates::PkgUpdate> {
+    if let Some(hit) = memo_get() {
+        return hit;
+    }
+    let fresh = check_flatpak_updates_for(installed, cfg);
+    memo_store(fresh.clone());
+    fresh
+}
+
+fn memo_get() -> Option<Vec<crate::updates::PkgUpdate>> {
     const TTL_SECS: u64 = 300;
     let now = std::time::Instant::now();
     let memo = FLATPAK_UPDATES_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
@@ -655,13 +710,16 @@ pub fn check_flatpak_updates_cached(cfg: &crate::config::Config) -> Vec<crate::u
         && let (Some(at), ref cached) = *guard
         && now.duration_since(at).as_secs() < TTL_SECS
     {
-        return cached.clone();
+        return Some(cached.clone());
     }
-    let fresh = check_flatpak_updates_with_config(cfg);
+    None
+}
+
+fn memo_store(fresh: Vec<crate::updates::PkgUpdate>) {
+    let memo = FLATPAK_UPDATES_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
     if let Ok(mut guard) = memo.lock() {
-        *guard = (Some(now), fresh.clone());
+        *guard = (Some(std::time::Instant::now()), fresh);
     }
-    fresh
 }
 
 /// Forget the memoized flatpak update list (refresh/upgrade/clean paths).
@@ -930,6 +988,29 @@ mod tests {
         let a = check_flatpak_updates_cached(&cfg);
         let b = check_flatpak_updates_cached(&cfg);
         assert_eq!(a, b);
+        // Same memo serves the pre-fetched-list variant (P3 single-scan):
+        // recompute from an explicit list must match the internal-list result.
+        let listed = list_installed().unwrap_or_default();
         invalidate_flatpak_memo();
+        let c = check_flatpak_updates_cached_for(&listed, &cfg);
+        assert_eq!(a, c);
+        invalidate_flatpak_memo();
+    }
+
+    #[test]
+    fn for_list_variants_short_circuit_without_spawning() {
+        // Disabled or empty list returns empty with no subprocess.
+        // (Uncached `for` only — the cached variant shares the memo with the
+        // test above, so its lifecycle is asserted there.)
+        let mut cfg = crate::config::Config::default();
+        cfg.behavior.flatpak_enabled = false;
+        let pkgs = vec![Package::minimal(
+            "org.x.App".into(),
+            "1.0".into(),
+            "flatpak".into(),
+        )];
+        assert!(check_flatpak_updates_for(&pkgs, &cfg).is_empty());
+        let cfg = crate::config::Config::default();
+        assert!(check_flatpak_updates_for(&[], &cfg).is_empty());
     }
 }
