@@ -1212,6 +1212,7 @@ impl App {
             Ok(()) => {
                 if is_flatpak {
                     crate::sources::invalidate_flatpak_memo();
+                    crate::sources::invalidate_flatpak_list_memo();
                 }
                 self.status = format!("Installed {}", name);
                 self.popup = Popup::Message(format!("✓ Installed {}", name));
@@ -1259,6 +1260,7 @@ impl App {
                 };
                 if is_flatpak {
                     crate::sources::invalidate_flatpak_memo();
+                    crate::sources::invalidate_flatpak_list_memo();
                 }
                 self.status = format!("Removed {} ({})", name, marker);
                 self.popup = Popup::Message(format!("✓ Removed {} ({})", name, marker));
@@ -1353,6 +1355,7 @@ impl App {
         self.clear_cache();
         crate::updates::invalidate_aur_memo();
         crate::sources::invalidate_flatpak_memo();
+        crate::sources::invalidate_flatpak_list_memo();
         self.dirty = true;
         let should_fetch =
             !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();

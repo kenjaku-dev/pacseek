@@ -217,7 +217,8 @@ async fn main() -> anyhow::Result<()> {
                 return (0usize, 0usize);
             }
             let timer = pacseek::timing::start("flatpak-list");
-            let listed = match task::spawn_blocking(pacseek::sources::list_installed).await {
+            // Perf P4: cached inventory shared with the updates check below.
+            let listed = match task::spawn_blocking(pacseek::sources::list_installed_cached).await {
                 Ok(Ok(v)) => v,
                 Ok(Err(e)) => {
                     tracing::warn!(err=?e, "flatpak list failed");
@@ -315,6 +316,7 @@ async fn main() -> anyhow::Result<()> {
                 // Refresh update memos so the Updates tab is current.
                 pacseek::updates::invalidate_aur_memo();
                 pacseek::sources::invalidate_flatpak_memo();
+                pacseek::sources::invalidate_flatpak_list_memo();
                 if let Err(e) = pacseek::sources::update_all_flatpak(&cfg) {
                     eprintln!("warning: flatpak update failed: {}", e);
                 }
@@ -477,8 +479,9 @@ async fn main() -> anyhow::Result<()> {
         };
         match res {
             Ok(()) => {
-                // Installed set changed — updates memo is stale.
+                // Installed set changed — updates + inventory memos are stale.
                 pacseek::sources::invalidate_flatpak_memo();
+                pacseek::sources::invalidate_flatpak_list_memo();
                 println!("Removed {}", name.trim());
                 return Ok(());
             }

@@ -68,7 +68,7 @@ impl SourceBackend for FlatpakBackend {
     }
 
     fn list_installed(&self) -> anyhow::Result<Vec<Package>> {
-        list_installed()
+        list_installed_cached()
     }
 
     fn search(
@@ -134,6 +134,52 @@ pub fn list_installed() -> anyhow::Result<Vec<Package>> {
         None => Ok(vec![]),
     }
 }
+
+/// Cached inventory (perf P4): the installed set changes only via
+/// install/remove/update, all of which call `invalidate_flatpak_list_memo()`.
+/// 60s TTL covers rapid Tab-switching and `--stats` re-entry without
+/// re-spawning. Same content as [`list_installed`], maybe 60s stale.
+pub fn list_installed_cached() -> anyhow::Result<Vec<Package>> {
+    if let Some(hit) = list_memo_get() {
+        return Ok(hit);
+    }
+    let fresh = list_installed()?;
+    list_memo_store(fresh.clone());
+    Ok(fresh)
+}
+
+/// Forget the cached inventory (install/remove/upgrade/clean paths — always
+/// next to `invalidate_flatpak_memo()`).
+pub fn invalidate_flatpak_list_memo() {
+    let memo = FLATPAK_LIST_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (None, Vec::new());
+    }
+}
+
+fn list_memo_get() -> Option<Vec<Package>> {
+    const TTL_SECS: u64 = 60;
+    let now = std::time::Instant::now();
+    let memo = FLATPAK_LIST_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(guard) = memo.lock()
+        && let (Some(at), ref cached) = *guard
+        && now.duration_since(at).as_secs() < TTL_SECS
+    {
+        return Some(cached.clone());
+    }
+    None
+}
+
+fn list_memo_store(fresh: Vec<Package>) {
+    let memo = FLATPAK_LIST_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (Some(std::time::Instant::now()), fresh);
+    }
+}
+
+static FLATPAK_LIST_MEMO: std::sync::OnceLock<
+    std::sync::Mutex<(Option<std::time::Instant>, Vec<Package>)>,
+> = std::sync::OnceLock::new();
 
 /// Run flatpak with a wall-clock bound via the shared runner (perf P2).
 /// None covers timeout/spawn failure (fail-open); only successful stdout
@@ -607,7 +653,8 @@ pub fn check_flatpak_updates_with_config(
     if !cfg.flatpak_enabled() || !has_flatpak() {
         return vec![];
     }
-    let installed = list_installed().unwrap_or_default();
+    // Perf P4: cached inventory (60s) — one scan serves list + updates.
+    let installed = list_installed_cached().unwrap_or_default();
     check_flatpak_updates_for(&installed, cfg)
 }
 
@@ -813,6 +860,24 @@ mod tests {
         let pkgs = list_installed().unwrap_or_default();
         // Machine has flatpaks; off-Arch CI skips via early return above.
         assert!(pkgs.iter().all(|p| p.repo == "flatpak" && p.installed));
+    }
+
+    #[test]
+    fn list_cache_matches_live_and_invalidates() {
+        invalidate_flatpak_list_memo();
+        if !has_flatpak() {
+            // Absent binary: both error with the install hint, no spawn.
+            assert!(list_installed().is_err());
+            assert!(list_installed_cached().is_err());
+            return;
+        }
+        let live = list_installed().unwrap_or_default();
+        let cached = list_installed_cached().unwrap_or_default();
+        assert_eq!(live, cached);
+        // Second call serves the memo (same content, no spawn needed).
+        let cached2 = list_installed_cached().unwrap_or_default();
+        assert_eq!(live, cached2);
+        invalidate_flatpak_list_memo();
     }
 
     const SEARCH_JSON: &str = r#"[
