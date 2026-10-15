@@ -92,6 +92,13 @@ async fn main() -> anyhow::Result<()> {
             let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
             all.extend(aur);
         }
+        // Flatpak updates via remote-info (fail-open empty when disabled/offline).
+        let cfg_fp = cfg.clone();
+        let flatpak =
+            task::spawn_blocking(move || pacseek::sources::check_flatpak_updates_cached(&cfg_fp))
+                .await
+                .unwrap_or_default();
+        all.extend(flatpak);
         all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         pacseek::output::print_updates(&all, cli.json, cli.no_color)?;
         return Ok(());
@@ -120,6 +127,20 @@ async fn main() -> anyhow::Result<()> {
         {
             let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
             stats.updates_aur = aur.len();
+        }
+        // Best-effort flatpak inventory + updates (absent/disabled -> 0).
+        if cfg.flatpak_enabled() {
+            if let Ok(list) = task::spawn_blocking(pacseek::sources::list_installed).await {
+                stats.flatpak_installed = list.unwrap_or_default().len();
+            }
+            let cfg_fp2 = cfg.clone();
+            if let Ok(up) = task::spawn_blocking(move || {
+                pacseek::sources::check_flatpak_updates_cached(&cfg_fp2)
+            })
+            .await
+            {
+                stats.updates_flatpak = up.len();
+            }
         }
         pacseek::output::print_stats(&stats, cli.json, cli.no_color)?;
         return Ok(());
@@ -172,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
             let mut input = stdin.lock();
             let mut output = std::io::stderr();
             if !confirm_prompt(
-                "Upgrade system (sudo pacman -Syu)?",
+                "Upgrade system (sudo pacman -Syu + flatpak update)?",
                 &mut input,
                 &mut output,
             ) {
@@ -187,6 +208,15 @@ async fn main() -> anyhow::Result<()> {
         }
         match pacseek::install::upgrade::upgrade_system(&cfg) {
             Ok(()) => {
+                // Flatpak refs upgrade alongside (fail-open when absent).
+                // Best-effort: a flatpak failure warns but keeps the pacman
+                // upgrade's success (scripts see exit 0 + stderr note).
+                // Refresh update memos so the Updates tab is current.
+                pacseek::updates::invalidate_aur_memo();
+                pacseek::sources::invalidate_flatpak_memo();
+                if let Err(e) = pacseek::sources::update_all_flatpak(&cfg) {
+                    eprintln!("warning: flatpak update failed: {}", e);
+                }
                 println!("System upgraded");
                 return Ok(());
             }
@@ -313,6 +343,8 @@ async fn main() -> anyhow::Result<()> {
         };
         match res {
             Ok(()) => {
+                // Installed set changed — updates memo is stale.
+                pacseek::sources::invalidate_flatpak_memo();
                 println!("Removed {}", name.trim());
                 return Ok(());
             }

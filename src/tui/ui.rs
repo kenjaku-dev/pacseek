@@ -823,7 +823,7 @@ fn draw_confirm_upgrade_popup(f: &mut Frame, area: Rect, app: &App) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Will run: sudo pacman -Syu [needs password]",
+            "Will run: sudo pacman -Syu + flatpak update [needs password]",
             if app.no_color {
                 Style::default()
             } else {

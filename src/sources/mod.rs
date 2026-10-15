@@ -8,9 +8,10 @@
 pub mod flatpak;
 
 pub use flatpak::{
-    FlatpakBackend, clean_unused_flatpak, has_flatpak, install_flatpak_package,
+    FlatpakBackend, check_flatpak_updates_cached, check_flatpak_updates_with_config,
+    clean_unused_flatpak, has_flatpak, install_flatpak_package, invalidate_flatpak_memo,
     is_flatpak_installed, list_installed, remove_flatpak_package, search_flatpak_with_config,
-    validate_app_id,
+    update_all_flatpak, update_flatpak_package, validate_app_id,
 };
 
 use crate::model::Package;
@@ -54,7 +55,11 @@ pub trait SourceBackend {
     }
 
     /// P4: available updates as (name, old, new). Default empty.
-    fn check_updates(&self) -> anyhow::Result<Vec<(String, String, String)>> {
+    fn check_updates(
+        &self,
+        cfg: &crate::config::Config,
+    ) -> anyhow::Result<Vec<(String, String, String)>> {
+        let _ = cfg;
         Ok(vec![])
     }
 }

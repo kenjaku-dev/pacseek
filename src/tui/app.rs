@@ -862,6 +862,8 @@ impl App {
             thread::spawn(move || {
                 let mut all = crate::updates::check_repo_updates().unwrap_or_default();
                 all.extend(crate::updates::check_aur_updates_blocking(&cfg));
+                // Flatpak via remote-info memo (fail-open empty when disabled).
+                all.extend(crate::sources::check_flatpak_updates_cached(&cfg));
                 all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
                 // Filter by input (name substring, or regex when enabled).
                 let filtered: Vec<crate::updates::PkgUpdate> = if query_clone.is_empty() {
@@ -1118,7 +1120,13 @@ impl App {
         // Prepare install function that runs outside TUI
         let install_result = super::super::tui::suspend_and_run(terminal, move || {
             if is_flatpak {
-                crate::sources::install_flatpak_package(&name_for_closure, &cfg_for_closure)
+                // Updates-tab rows carry installed=true (built from PkgUpdate);
+                // Search rows carry installed=false. Update vs install follows.
+                if pkg_clone.installed {
+                    crate::sources::update_flatpak_package(&name_for_closure, &cfg_for_closure)
+                } else {
+                    crate::sources::install_flatpak_package(&name_for_closure, &cfg_for_closure)
+                }
             } else if is_aur {
                 crate::install::aur::install_aur_package(&pkg_clone)
             } else {
@@ -1128,6 +1136,9 @@ impl App {
 
         match install_result {
             Ok(()) => {
+                if is_flatpak {
+                    crate::sources::invalidate_flatpak_memo();
+                }
                 self.status = format!("Installed {}", name);
                 self.popup = Popup::Message(format!("✓ Installed {}", name));
             }
@@ -1172,6 +1183,9 @@ impl App {
                 } else {
                     flag_preview.as_str()
                 };
+                if is_flatpak {
+                    crate::sources::invalidate_flatpak_memo();
+                }
                 self.status = format!("Removed {} ({})", name, marker);
                 self.popup = Popup::Message(format!("✓ Removed {} ({})", name, marker));
             }
@@ -1219,6 +1233,7 @@ impl App {
         self.last_query_updates.clear();
         self.clear_cache();
         crate::updates::invalidate_aur_memo();
+        crate::sources::invalidate_flatpak_memo();
         self.dirty = true;
         let should_fetch =
             !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
@@ -1238,9 +1253,14 @@ impl App {
         }
         // 5.1: news warning already surfaced inline in the popup (set on `U`);
         // confirming here means the user read it — proceed directly.
+        // Flatpak refs upgrade alongside pacman (best-effort, no sudo).
         let cfg = self.config.clone();
-        let res = super::super::tui::suspend_and_run(terminal, move || {
-            crate::install::upgrade::upgrade_system(&cfg)
+        let res = super::super::tui::suspend_and_run(terminal, move || -> anyhow::Result<()> {
+            crate::install::upgrade::upgrade_system(&cfg)?;
+            if let Err(e) = crate::sources::update_all_flatpak(&cfg) {
+                eprintln!("warning: flatpak update failed: {e}");
+            }
+            Ok(())
         });
         match res {
             Ok(()) => {
@@ -1258,6 +1278,7 @@ impl App {
         self.last_query_updates.clear();
         self.clear_cache();
         crate::updates::invalidate_aur_memo();
+        crate::sources::invalidate_flatpak_memo();
         self.dirty = true;
         let should_fetch =
             !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();
@@ -1296,6 +1317,8 @@ impl App {
         self.last_query_installed.clear();
         self.last_query_updates.clear();
         self.clear_cache();
+        crate::updates::invalidate_aur_memo();
+        crate::sources::invalidate_flatpak_memo();
         self.dirty = true;
         let should_fetch =
             !matches!(self.mode, Mode::Search) || !self.input.value().trim().is_empty();

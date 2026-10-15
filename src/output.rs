@@ -263,6 +263,12 @@ pub fn print_stats(
     if stats.updates_aur > 0 {
         println!("{} {}", "AUR updates:".bold(), stats.updates_aur);
     }
+    if stats.updates_flatpak > 0 {
+        println!("{} {}", "Flatpak updates:".bold(), stats.updates_flatpak);
+    }
+    if stats.flatpak_installed > 0 {
+        println!("{} {}", "Flatpak apps:".bold(), stats.flatpak_installed);
+    }
     println!(
         "{} {}",
         "Pacman cache:".bold(),

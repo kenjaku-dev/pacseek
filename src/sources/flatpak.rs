@@ -88,6 +88,16 @@ impl SourceBackend for FlatpakBackend {
     fn remove(&self, id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
         remove_flatpak_package(id, cfg)
     }
+
+    fn check_updates(
+        &self,
+        cfg: &crate::config::Config,
+    ) -> anyhow::Result<Vec<(String, String, String)>> {
+        Ok(check_flatpak_updates_with_config(cfg)
+            .into_iter()
+            .map(|u| (u.name, u.old_version, u.new_version))
+            .collect())
+    }
 }
 
 /// `which flatpak` probe. No output parsing, exit status only.
@@ -505,6 +515,193 @@ pub fn search_flatpak_with_config(
     Ok(pkgs)
 }
 
+/// Args for `flatpak update <id>`. `-y` only with noconfirm.
+pub fn update_command_args(id: &str, noconfirm: bool) -> Vec<String> {
+    let mut args = vec!["update".to_string(), id.to_string()];
+    if noconfirm {
+        args.push("-y".to_string());
+    }
+    args
+}
+
+/// Args for `flatpak update` (all refs).
+pub fn update_all_command_args(noconfirm: bool) -> Vec<String> {
+    let mut args = vec!["update".to_string()];
+    if noconfirm {
+        args.push("-y".to_string());
+    }
+    args
+}
+
+fn run_flatpak_inherit(args: &[String], what: &str) -> anyhow::Result<()> {
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let status = Command::new("flatpak")
+        .args(&refs)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run {what}: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("{what} failed with exit {}", status.code().unwrap_or(-1));
+    }
+    Ok(())
+}
+
+/// Update one installed app (`flatpak update <id>`). No sudo; readonly refused.
+pub fn update_flatpak_package(id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+    let id = validate_app_id(id)?;
+    if cfg.is_readonly() {
+        anyhow::bail!("refusing to update: readonly mode is enabled");
+    }
+    if !has_flatpak() {
+        anyhow::bail!("flatpak not found — install flatpak to manage flatpak apps");
+    }
+    if !is_flatpak_installed(&id) {
+        anyhow::bail!("flatpak app '{id}' is not installed");
+    }
+    run_flatpak_inherit(
+        &update_command_args(&id, cfg.flatpak_noconfirm()),
+        "flatpak update",
+    )
+}
+
+/// Update all flatpak refs (`flatpak update`). Fail-open Ok when disabled or
+/// binary missing so `--upgrade` degrades to pacman-only — callers needing
+/// strictness check `has_flatpak()` first.
+pub fn update_all_flatpak(cfg: &crate::config::Config) -> anyhow::Result<()> {
+    if cfg.is_readonly() {
+        anyhow::bail!("refusing to update: readonly mode is enabled");
+    }
+    if !cfg.flatpak_enabled() || !has_flatpak() {
+        return Ok(());
+    }
+    run_flatpak_inherit(
+        &update_all_command_args(cfg.flatpak_noconfirm()),
+        "flatpak update",
+    )
+}
+
+/// Parse the `Version:` line from `flatpak remote-info` text output.
+/// None when absent/empty (fail-open: app skipped, never an error).
+pub fn parse_remote_info_version(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if let Some(rest) = line.trim().strip_prefix("Version:") {
+            let v = rest.trim().to_string();
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// Live remote version for one installed app via
+/// `flatpak remote-info --<scope> <origin> <id>`. None covers disabled
+/// remotes, timeouts, missing refs — all fail-open skips.
+fn remote_version(app_id: &str, origin: &str, scope: &str, timeout: Duration) -> Option<String> {
+    let id_owned = app_id.to_string();
+    let origin_owned = origin.to_string();
+    let scope_owned = scope.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = Command::new("flatpak")
+            .args([
+                "remote-info",
+                scope_owned.as_str(),
+                origin_owned.as_str(),
+                id_owned.as_str(),
+            ])
+            .output();
+        let text = out
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+        let _ = tx.send(text.and_then(|t| parse_remote_info_version(&t)));
+    });
+    rx.recv_timeout(timeout).ok().flatten()
+}
+
+/// Available flatpak updates: installed version vs remote `Version:`.
+/// String inequality (flatpak versions are freeform, not alpm-comparable);
+/// `?`/empty versions and failed lookups are skipped, never errors.
+/// Both installations probed (`--system` then `--user`) since one id can live
+/// in either.
+pub fn check_flatpak_updates_with_config(
+    cfg: &crate::config::Config,
+) -> Vec<crate::updates::PkgUpdate> {
+    if !cfg.flatpak_enabled() || !has_flatpak() {
+        return vec![];
+    }
+    let installed = list_installed().unwrap_or_default();
+    if installed.is_empty() {
+        return vec![];
+    }
+    let timeout = Duration::from_secs(cfg.search.timeout_secs.max(1));
+    let mut out = Vec::new();
+    for pkg in &installed {
+        // Strip the non-stable branch suffix the list parser appends
+        // ("1.0 (beta)") — remote-info versions carry no branch.
+        let local = pkg.version.split(" (").next().unwrap_or("").trim();
+        if local.is_empty() || local == "?" {
+            continue;
+        }
+        let origin = pkg
+            .url
+            .as_deref()
+            .and_then(|u| u.strip_prefix("flatpak:"))
+            .unwrap_or("flathub");
+        let remote = remote_version(&pkg.name, origin, "--system", timeout)
+            .or_else(|| remote_version(&pkg.name, origin, "--user", timeout));
+        if let Some(rv) = remote {
+            let rv = rv.trim().to_string();
+            if !rv.is_empty() && rv != local {
+                out.push(crate::updates::PkgUpdate {
+                    name: pkg.name.clone(),
+                    old_version: local.to_string(),
+                    new_version: rv,
+                    repo: "flatpak".to_string(),
+                    out_of_date: false,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Memoized updates (`caching`: TTL + explicit invalidate). Remote-info is one
+/// spawn per app, so Tab-switching within the TTL reuses the last check;
+/// F5/upgrade paths call `invalidate_flatpak_memo()` for a fresh check.
+pub fn check_flatpak_updates_cached(cfg: &crate::config::Config) -> Vec<crate::updates::PkgUpdate> {
+    const TTL_SECS: u64 = 300;
+    let now = std::time::Instant::now();
+    let memo = FLATPAK_UPDATES_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(guard) = memo.lock()
+        && let (Some(at), ref cached) = *guard
+        && now.duration_since(at).as_secs() < TTL_SECS
+    {
+        return cached.clone();
+    }
+    let fresh = check_flatpak_updates_with_config(cfg);
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (Some(now), fresh.clone());
+    }
+    fresh
+}
+
+/// Forget the memoized flatpak update list (refresh/upgrade/clean paths).
+pub fn invalidate_flatpak_memo() {
+    let memo = FLATPAK_UPDATES_MEMO.get_or_init(|| std::sync::Mutex::new((None, Vec::new())));
+    if let Ok(mut guard) = memo.lock() {
+        *guard = (None, Vec::new());
+    }
+}
+
+static FLATPAK_UPDATES_MEMO: std::sync::OnceLock<
+    std::sync::Mutex<(Option<std::time::Instant>, Vec<crate::updates::PkgUpdate>)>,
+> = std::sync::OnceLock::new();
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,7 +906,56 @@ mod tests {
         let b = FlatpakBackend::new("flathub".to_string(), true);
         assert!(b.install("bad", &cfg).is_err());
         assert!(b.remove("bad", &cfg).is_err());
-        assert!(b.check_updates().unwrap().is_empty());
+        // Disabled backend short-circuits to empty without spawning.
+        let mut off_cfg = crate::config::Config::default();
+        off_cfg.behavior.flatpak_enabled = false;
+        assert!(b.check_updates(&off_cfg).unwrap().is_empty());
         assert!(b.search("", 10, false, &cfg).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_remote_info_version_vectors() {
+        let out = "Drift - Edit videos\n\n            ID: org.cutwire.Drift\n       Version: 0.8.0\n       License: GPL\n";
+        assert_eq!(parse_remote_info_version(out), Some("0.8.0".to_string()));
+        assert_eq!(parse_remote_info_version("no version here\n"), None);
+        assert_eq!(parse_remote_info_version("Version:   \n"), None);
+        assert_eq!(parse_remote_info_version(""), None);
+    }
+
+    #[test]
+    fn update_args_no_sudo_confirm_gated() {
+        assert_eq!(
+            update_command_args("org.x.App", false),
+            vec!["update", "org.x.App"]
+        );
+        assert_eq!(
+            update_command_args("org.x.App", true),
+            vec!["update", "org.x.App", "-y"]
+        );
+        assert_eq!(update_all_command_args(false), vec!["update"]);
+        assert_eq!(update_all_command_args(true), vec!["update", "-y"]);
+    }
+
+    #[test]
+    fn update_readonly_and_invalid_refuse_without_spawning() {
+        let mut cfg = crate::config::Config::default();
+        cfg.behavior.readonly = true;
+        assert!(update_flatpak_package("org.mozilla.firefox", &cfg).is_err());
+        assert!(update_all_flatpak(&cfg).is_err());
+        let cfg = crate::config::Config::default();
+        assert!(update_flatpak_package("bad", &cfg).is_err());
+    }
+
+    #[test]
+    fn flatpak_memo_invalidate_is_safe() {
+        invalidate_flatpak_memo();
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
+        let cfg = crate::config::Config::default();
+        let a = check_flatpak_updates_cached(&cfg);
+        let b = check_flatpak_updates_cached(&cfg);
+        assert_eq!(a, b);
+        invalidate_flatpak_memo();
     }
 }

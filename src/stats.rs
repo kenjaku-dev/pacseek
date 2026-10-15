@@ -8,6 +8,8 @@ pub struct SysStats {
     pub orphans: usize,
     pub updates_repo: usize,
     pub updates_aur: usize,
+    pub updates_flatpak: usize,
+    pub flatpak_installed: usize,
     pub cache_pacman_bytes: u64,
     pub cache_pacseek_bytes: u64,
 }
@@ -32,6 +34,8 @@ pub fn gather_local_stats() -> SysStats {
         orphans,
         updates_repo,
         updates_aur: 0,
+        updates_flatpak: 0,
+        flatpak_installed: 0,
         cache_pacman_bytes: dir_size("/var/cache/pacman/pkg"),
         cache_pacseek_bytes: cache_size(),
     }
