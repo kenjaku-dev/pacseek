@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+//! TUI snapshot tests (test-only crate: unwraps are idiomatic here).
+
 use pacseek::model::Package;
 use pacseek::tui::app::{App, Focus, Mode, Popup};
 use ratatui::{Terminal, backend::TestBackend};

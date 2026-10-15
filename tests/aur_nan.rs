@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+//! NaN/unicode edge tests (test-only crate: unwraps are idiomatic here).
+
 use pacseek::model::Package;
 
 #[test]

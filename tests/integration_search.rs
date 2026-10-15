@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+//! CLI integration tests (test-only crate: unwraps are idiomatic here).
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 

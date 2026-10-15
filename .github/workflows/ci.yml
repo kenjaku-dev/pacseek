@@ -73,12 +73,12 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Unit tests (offline)
-        run: cargo test --locked --test aur_nan --test tui_snapshot
+        run: cargo test --locked --lib --test aur_nan --test tui_snapshot
 
       - name: Sync pacman DB + integration tests
         run: |
           pacman -Sy --noconfirm
-          cargo test --locked --test integration_search
+          cargo test --locked --test integration_search --test chaos_shims
 
       - name: Release binary (size check)
         run: |

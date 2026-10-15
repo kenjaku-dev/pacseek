@@ -1,3 +1,6 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+//! pacseek library: search backends, install runners, TUI state.
+
 pub mod cli;
 pub mod config;
 pub mod confirm;

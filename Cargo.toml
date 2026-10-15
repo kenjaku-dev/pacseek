@@ -11,6 +11,13 @@ categories = ["command-line-utilities"]
 readme = "README.md"
 rust-version = "1.88"
 
+# Perf P5: production code must never panic on bad input — deny unwrap/expect
+# everywhere, then re-allow inside #[cfg(test)] modules (one cfg_attr in
+# lib.rs covers all lib unit tests; integration files allow at file top).
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive", "color", "wrap_help"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
