@@ -70,7 +70,11 @@ pub enum Popup {
     ConfirmRemove(Package),
     ConfirmRefresh,
     ConfirmUpgrade,
-    ConfirmClean { files: usize, bytes: u64 },
+    ConfirmClean {
+        files: usize,
+        bytes: u64,
+        flatpak: bool,
+    },
     Help,
     Message(String),
 }
@@ -539,9 +543,13 @@ impl App {
                                     self.upgrade_warn = None;
                                     self.do_upgrade(terminal)?;
                                 }
-                                Popup::ConfirmClean { files, bytes } => {
+                                Popup::ConfirmClean {
+                                    files,
+                                    bytes,
+                                    flatpak,
+                                } => {
                                     self.popup = Popup::None;
-                                    self.do_clean(files, bytes, terminal)?;
+                                    self.do_clean(files, bytes, flatpak, terminal)?;
                                 }
                                 _ => {
                                     self.popup = Popup::None;
@@ -566,9 +574,13 @@ impl App {
                                 self.upgrade_warn = None;
                                 self.do_upgrade(terminal)?;
                             }
-                            Popup::ConfirmClean { files, bytes } => {
+                            Popup::ConfirmClean {
+                                files,
+                                bytes,
+                                flatpak,
+                            } => {
                                 self.popup = Popup::None;
-                                self.do_clean(files, bytes, terminal)?;
+                                self.do_clean(files, bytes, flatpak, terminal)?;
                             }
                             _ => {}
                         },
@@ -703,6 +715,8 @@ impl App {
                                 self.popup = Popup::ConfirmClean {
                                     files: p.files,
                                     bytes: p.bytes,
+                                    flatpak: self.config.flatpak_enabled()
+                                        && crate::sources::has_flatpak(),
                                 };
                             }
                             Err(e) => {
@@ -1289,23 +1303,42 @@ impl App {
         Ok(())
     }
 
-    fn do_clean(&mut self, files: usize, bytes: u64, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn do_clean(
+        &mut self,
+        files: usize,
+        bytes: u64,
+        flatpak: bool,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<()> {
         if self.readonly {
             self.popup = Popup::Message("Readonly mode — clean disabled".into());
             self.status = "Refused clean: readonly mode".into();
             self.dirty = true;
             return Ok(());
         }
+        // Popup confirm covers both stages: force -y downstream.
         let keep = self.config.behavior.clean_keep.max(1);
         let cfg = self.config.clone();
-        let res = super::super::tui::suspend_and_run(terminal, move || {
-            crate::install::clean::run_clean(&cfg, keep)
+        let res = super::super::tui::suspend_and_run(terminal, move || -> anyhow::Result<bool> {
+            if files > 0 {
+                crate::install::clean::run_clean(&cfg, keep)?;
+            }
+            if flatpak {
+                let mut cfg_fp = cfg.clone();
+                cfg_fp.behavior.flatpak_noconfirm = true;
+                crate::sources::clean_unused_flatpak(&cfg_fp)?;
+            }
+            Ok(flatpak)
         });
         match res {
-            Ok(()) => {
+            Ok(fp) => {
                 let size = crate::stats::human_bytes(bytes);
-                self.status = format!("Cleaned {files} files ({size})");
-                self.popup = Popup::Message(format!("✓ Cleaned {files} files ({size})"));
+                let mut msg = format!("Cleaned {files} files ({size})");
+                if fp {
+                    msg.push_str(" + flatpak unused");
+                }
+                self.status = msg.clone();
+                self.popup = Popup::Message(format!("✓ {msg}"));
             }
             Err(e) => {
                 self.status = format!("Clean failed: {e}");

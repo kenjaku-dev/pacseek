@@ -276,11 +276,26 @@ fn tui_confirm_clean_popup_renders() {
     app.popup = Popup::ConfirmClean {
         files: 16,
         bytes: 870 * 1024 * 1024,
+        flatpak: false,
     };
     let content = render(&app, 80, 24);
     assert!(content.contains("Confirm clean"));
     assert!(content.contains("16 cached files"));
     assert!(content.contains("paccache"));
+}
+
+#[test]
+fn tui_confirm_clean_flatpak_popup_renders() {
+    let mut app = App::new("".into());
+    app.focus = Focus::List;
+    app.popup = Popup::ConfirmClean {
+        files: 16,
+        bytes: 870 * 1024 * 1024,
+        flatpak: true,
+    };
+    let content = render(&app, 80, 24);
+    assert!(content.contains("Confirm clean"));
+    assert!(content.contains("flatpak --unused"));
 }
 
 #[test]

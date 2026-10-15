@@ -250,9 +250,19 @@ async fn main() -> anyhow::Result<()> {
         };
         if cli.dry_run || cli.json {
             pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
+            // Flatpak has no byte preview; say so instead of silence.
+            if !cli.json
+                && cfg.flatpak_enabled()
+                && pacseek::sources::has_flatpak()
+                && preview.files > 0
+            {
+                eprintln!("+ unused flatpak runtimes (no preview available)");
+            }
             return Ok(());
         }
-        if preview.files == 0 {
+        // P5: unused flatpak runtimes clean alongside paccache when available.
+        let flatpak_clean = cfg.flatpak_enabled() && pacseek::sources::has_flatpak();
+        if preview.files == 0 && !flatpak_clean {
             pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
             return Ok(());
         }
@@ -262,14 +272,20 @@ async fn main() -> anyhow::Result<()> {
             let mut input = stdin.lock();
             let mut output = std::io::stderr();
             let size = pacseek::stats::human_bytes(preview.bytes);
-            if !confirm_prompt(
-                &format!(
+            let prompt = if preview.files == 0 {
+                "Pacman cache already clean. Remove unused flatpak runtimes?".to_string()
+            } else if flatpak_clean {
+                format!(
+                    "Remove {} cached files ({})? [keep {}] + unused flatpak runtimes",
+                    preview.files, size, keep
+                )
+            } else {
+                format!(
                     "Remove {} cached files ({})? [keep {}]",
                     preview.files, size, keep
-                ),
-                &mut input,
-                &mut output,
-            ) {
+                )
+            };
+            if !confirm_prompt(&prompt, &mut input, &mut output) {
                 eprintln!("cancelled");
                 return Ok(());
             }
@@ -279,16 +295,33 @@ async fn main() -> anyhow::Result<()> {
             );
             std::process::exit(2);
         }
-        match pacseek::install::clean::run_clean(&cfg, keep) {
-            Ok(()) => {
-                pacseek::output::print_clean(&preview, false, cli.json, cli.no_color)?;
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("clean failed: {}", e);
-                std::process::exit(1);
+        // The confirm above covers both stages: force -y downstream so neither
+        // tool re-prompts after the user already said yes.
+        if preview.files > 0 {
+            match pacseek::install::clean::run_clean(&cfg, keep) {
+                Ok(()) => {
+                    pacseek::output::print_clean(&preview, false, cli.json, cli.no_color)?;
+                }
+                Err(e) => {
+                    eprintln!("clean failed: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
+        if flatpak_clean {
+            let mut cfg_fp = cfg.clone();
+            cfg_fp.behavior.flatpak_noconfirm = true;
+            match pacseek::sources::clean_unused_flatpak(&cfg_fp) {
+                Ok(()) => {
+                    println!("✓ Removed unused flatpak runtimes");
+                }
+                Err(e) => {
+                    eprintln!("flatpak clean failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        return Ok(());
     }
 
     // --remove fast path (no TUI, no search) — mirrors remover mode confirm in TUI.

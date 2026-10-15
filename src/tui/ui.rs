@@ -74,9 +74,11 @@ pub fn draw(f: &mut Frame, app: &App) {
         Popup::ConfirmRemove(pkg) => draw_confirm_remove_popup(f, pkg, area, app),
         Popup::ConfirmRefresh => draw_confirm_refresh_popup(f, area, app),
         Popup::ConfirmUpgrade => draw_confirm_upgrade_popup(f, area, app),
-        Popup::ConfirmClean { files, bytes } => {
-            draw_confirm_clean_popup(f, *files, *bytes, area, app)
-        }
+        Popup::ConfirmClean {
+            files,
+            bytes,
+            flatpak,
+        } => draw_confirm_clean_popup(f, *files, *bytes, *flatpak, area, app),
         Popup::Help => draw_help_popup(f, area, app),
         Popup::Message(msg) => draw_message_popup(f, msg, area, app),
         Popup::None => {}
@@ -837,7 +839,14 @@ fn draw_confirm_upgrade_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(p, inner);
 }
 
-fn draw_confirm_clean_popup(f: &mut Frame, files: usize, bytes: u64, area: Rect, app: &App) {
+fn draw_confirm_clean_popup(
+    f: &mut Frame,
+    files: usize,
+    bytes: u64,
+    flatpak: bool,
+    area: Rect,
+    app: &App,
+) {
     // ui-design: one focal number (reclaimable size), one primary CTA.
     let sz = app.config.tui.popup_confirm.unwrap_or([60, 30]);
     let popup_area = centered_rect(sz[0], sz[1], area);
@@ -895,7 +904,11 @@ fn draw_confirm_clean_popup(f: &mut Frame, files: usize, bytes: u64, area: Rect,
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Will run: sudo paccache -r -kN [needs password]",
+            if flatpak {
+                "Will run: paccache -r + flatpak --unused"
+            } else {
+                "Will run: sudo paccache -r -kN [needs password]"
+            },
             if app.no_color {
                 Style::default()
             } else {

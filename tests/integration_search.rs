@@ -118,6 +118,8 @@ fn stats_valid_json() {
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("stats json valid");
     assert!(v.get("explicit").is_some());
     assert!(v.get("orphans").is_some());
+    assert!(v.get("updates_flatpak").is_some());
+    assert!(v.get("flatpak_installed").is_some());
 }
 
 #[test]
