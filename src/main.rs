@@ -10,6 +10,7 @@ use pacseek::config::Config;
 use pacseek::confirm::{confirm_prompt, should_confirm};
 use pacseek::output::{print_json_error, print_packages};
 use pacseek::search::{search_aur_with_config, search_repo, search_repo_fallback};
+use pacseek::sources::search_flatpak_with_config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -409,15 +410,25 @@ async fn main() -> anyhow::Result<()> {
 
     let query_repo = query.clone();
     let query_aur = query.clone();
+    let query_flatpak = query.clone();
     let limit_repo = cli.limit;
     let limit_aur = cli.limit;
+    let limit_flatpak = cli.limit;
     let regex_repo = cli.regex;
     let regex_aur = cli.regex;
+    let regex_flatpak = cli.regex;
     let installed_only = cli.installed_only;
     let by_str = cli.by.as_str().to_string();
+    let cfg_flatpak = cfg.clone();
+
+    let repo_enabled = matches!(cli.source, Source::Repo | Source::All);
+    let aur_enabled = matches!(cli.source, Source::Aur | Source::All) && !cli.installed_only;
+    let flatpak_enabled = matches!(cli.source, Source::Flatpak | Source::All)
+        && !cli.installed_only
+        && cfg.flatpak_enabled();
 
     let repo_future = async {
-        if matches!(cli.source, Source::Aur) {
+        if !repo_enabled {
             Vec::new()
         } else {
             let res = task::spawn_blocking(move || {
@@ -446,9 +457,10 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let aur_enabled = !matches!(cli.source, Source::Repo) && !cli.installed_only;
     if cli.installed_only && !matches!(cli.source, Source::Repo) && !cli.json {
-        eprintln!("Note: --installed-only only applies to repo packages, AUR results hidden");
+        eprintln!(
+            "Note: --installed-only only applies to repo packages, AUR/flatpak results hidden"
+        );
     }
 
     let aur_future = async {
@@ -467,6 +479,29 @@ async fn main() -> anyhow::Result<()> {
                         eprintln!("AUR search error: {}", e);
                     }
                     Vec::new()
+                }
+            }
+        }
+    };
+
+    let flatpak_future = async {
+        if !flatpak_enabled {
+            Vec::new()
+        } else {
+            let q = query_flatpak.clone();
+            let res = task::spawn_blocking(move || {
+                search_flatpak_with_config(&q, limit_flatpak, regex_flatpak, &cfg_flatpak)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(err=?e, "flatpak search failed");
+                        vec![]
+                    })
+            })
+            .await;
+            match res {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(err=?e, "spawn_blocking JoinError (flatpak search panicked)");
+                    vec![]
                 }
             }
         }
@@ -496,7 +531,8 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (repo_packages, aur_packages) = tokio::join!(repo_future, aur_future);
+    let (repo_packages, aur_packages, flatpak_packages) =
+        tokio::join!(repo_future, aur_future, flatpak_future);
 
     if let Some(pb) = spinner {
         pb.finish_and_clear();
@@ -505,6 +541,7 @@ async fn main() -> anyhow::Result<()> {
     print_packages(
         &repo_packages,
         &aur_packages,
+        &flatpak_packages,
         cli.source,
         cli.bottom_up,
         cli.json,

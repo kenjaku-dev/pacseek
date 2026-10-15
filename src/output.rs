@@ -6,6 +6,7 @@ use crate::model::Package;
 pub fn print_packages(
     repo_packages: &[Package],
     aur_packages: &[Package],
+    flatpak_packages: &[Package],
     source: Source,
     bottom_up: bool,
     json: bool,
@@ -19,6 +20,9 @@ pub fn print_packages(
         if matches!(source, Source::Aur | Source::All) {
             all.extend_from_slice(aur_packages);
         }
+        if matches!(source, Source::Flatpak | Source::All) {
+            all.extend_from_slice(flatpak_packages);
+        }
         println!("{}", serde_json::to_string_pretty(&all)?);
         return Ok(());
     }
@@ -30,7 +34,10 @@ pub fn print_packages(
     // Order handling
     let mut sections: Vec<(&str, &[Package])> = vec![];
     if bottom_up {
-        // AUR first
+        // Flatpak first (reverse of default)
+        if matches!(source, Source::Flatpak | Source::All) {
+            sections.push(("flatpak", flatpak_packages));
+        }
         if matches!(source, Source::Aur | Source::All) {
             sections.push(("aur", aur_packages));
         }
@@ -38,12 +45,15 @@ pub fn print_packages(
             sections.push(("repo", repo_packages));
         }
     } else {
-        // Repo first (default like pacman)
+        // Repo first (default like pacman), flatpak last
         if matches!(source, Source::Repo | Source::All) {
             sections.push(("repo", repo_packages));
         }
         if matches!(source, Source::Aur | Source::All) {
             sections.push(("aur", aur_packages));
+        }
+        if matches!(source, Source::Flatpak | Source::All) {
+            sections.push(("flatpak", flatpak_packages));
         }
     }
 
@@ -64,11 +74,12 @@ pub fn print_packages(
     }
 
     eprintln!(
-        "\n{} {} (repo: {}, aur: {})",
+        "\n{} {} (repo: {}, aur: {}, flatpak: {})",
         "Found".dimmed(),
         total.to_string().bold(),
         repo_packages.len(),
-        aur_packages.len()
+        aur_packages.len(),
+        flatpak_packages.len()
     );
 
     Ok(())
@@ -79,6 +90,8 @@ fn print_package(pkg: &Package, kind: &str) {
     let repo_part = format!("{}/{}", pkg.repo, pkg.name);
     let repo_colored = if kind == "aur" {
         repo_part.bright_magenta().bold()
+    } else if kind == "flatpak" {
+        repo_part.bright_cyan().bold()
     } else {
         match pkg.repo.as_str() {
             "core" => repo_part.red().bold(),

@@ -293,24 +293,33 @@ impl App {
             }
         } else if self.mode == Mode::Updates {
             self.last_query_updates = query.clone();
-            let repo_count = self.packages.iter().filter(|p| p.repo != "aur").count();
-            let aur_count = total.saturating_sub(repo_count);
+            let aur_count = self.packages.iter().filter(|p| p.repo == "aur").count();
+            let flatpak_count = self.packages.iter().filter(|p| p.repo == "flatpak").count();
+            let repo_count = total
+                .saturating_sub(aur_count)
+                .saturating_sub(flatpak_count);
             if total == 0 {
                 self.status = "System up to date".into();
             } else {
                 self.status = format!(
-                    "Updates {} (repo {} aur {}) — U:upgrade all",
-                    total, repo_count, aur_count
+                    "Updates {} (repo {} aur {} flatpak {}) — U:upgrade all",
+                    total, repo_count, aur_count, flatpak_count
                 );
             }
         } else {
             self.last_query_search = query.clone();
-            let repo_count = self.packages.iter().filter(|p| p.repo != "aur").count();
-            let aur_count = total.saturating_sub(repo_count);
+            let aur_count = self.packages.iter().filter(|p| p.repo == "aur").count();
+            let flatpak_count = self.packages.iter().filter(|p| p.repo == "flatpak").count();
+            let repo_count = total
+                .saturating_sub(aur_count)
+                .saturating_sub(flatpak_count);
             if total == 0 {
                 self.status = format!("No results for '{}'", query);
             } else {
-                self.status = format!("Found {} (repo {} aur {})", total, repo_count, aur_count);
+                self.status = format!(
+                    "Found {} (repo {} aur {} flatpak {})",
+                    total, repo_count, aur_count, flatpak_count
+                );
             }
         }
         self.dirty = true;
@@ -999,9 +1008,13 @@ impl App {
 
         thread::spawn(move || {
             let aur_by_str = aur_by.as_str().to_string();
-            // Spawn repo and aur in parallel, respecting source filter
+            // Spawn repo, aur, flatpak in parallel, respecting source filter.
+            // Flatpak is fail-open empty when disabled/binary missing (P2).
+            let flatpak_on = matches!(source, Source::Flatpak | Source::All)
+                && !installed_only
+                && cfg.flatpak_enabled();
             let q1 = query_clone.clone();
-            let repo_handle = if matches!(source, Source::Aur) {
+            let repo_handle = if matches!(source, Source::Aur | Source::Flatpak) {
                 None
             } else {
                 Some(thread::spawn(move || {
@@ -1011,13 +1024,27 @@ impl App {
                 }))
             };
             let q2 = query_clone.clone();
-            let aur_handle = if matches!(source, Source::Repo) || installed_only {
+            let cfg2 = cfg.clone();
+            let aur_handle = if matches!(source, Source::Repo | Source::Flatpak) || installed_only {
                 None
             } else {
                 Some(thread::spawn(move || {
-                    search_aur_blocking_with_config(&q2, &aur_by_str, limit, use_regex, &cfg)
+                    search_aur_blocking_with_config(&q2, &aur_by_str, limit, use_regex, &cfg2)
                         .unwrap_or_else(|e| {
                             tracing::warn!(err=?e, "AUR blocking search failed");
+                            vec![]
+                        })
+                }))
+            };
+            let q3 = query_clone.clone();
+            let cfg3 = cfg.clone();
+            let flatpak_handle = if !flatpak_on {
+                None
+            } else {
+                Some(thread::spawn(move || {
+                    crate::sources::search_flatpak_with_config(&q3, limit, use_regex, &cfg3)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err=?e, "flatpak search failed");
                             vec![]
                         })
                 }))
@@ -1041,11 +1068,22 @@ impl App {
                     }
                 })
                 .unwrap_or_default();
+            let flatpak_res = flatpak_handle
+                .map(|h| match h.join() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("flatpak worker panicked: {:?}", e);
+                        Vec::new()
+                    }
+                })
+                .unwrap_or_default();
 
-            let mut combined = Vec::with_capacity(repo_res.len() + aur_res.len());
-            // Respect source order: repo first unless bottom_up handled in UI; keep repo+aur
+            let mut combined =
+                Vec::with_capacity(repo_res.len() + aur_res.len() + flatpak_res.len());
+            // Respect source order: repo, aur, flatpak (bottom_up handled in UI).
             combined.extend(repo_res);
             combined.extend(aur_res);
+            combined.extend(flatpak_res);
 
             // Superseded while workers ran: drop instead of waking the UI.
             if active.load(Ordering::Relaxed) != search_id {

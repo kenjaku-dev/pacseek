@@ -362,7 +362,7 @@ impl Config {
 
 [search]
 limit = 50                 # 0 = no limit
-source = "all"             # aur|repo|all
+source = "all"             # aur|repo|flatpak|all
 by = "name-desc"           # name|name-desc|maintainer|depends|makedepends|optdepends|checkdepends
 regex = false
 installed_only = false
@@ -589,6 +589,7 @@ pub fn parse_source(s: &str) -> crate::cli::Source {
     match s.trim().to_lowercase().as_str() {
         "aur" => crate::cli::Source::Aur,
         "repo" => crate::cli::Source::Repo,
+        "flatpak" => crate::cli::Source::Flatpak,
         _ => crate::cli::Source::All,
     }
 }

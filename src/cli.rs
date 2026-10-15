@@ -122,6 +122,7 @@ pub struct Cli {
 pub enum Source {
     Aur,
     Repo,
+    Flatpak,
     All,
 }
 

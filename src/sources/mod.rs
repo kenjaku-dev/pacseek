@@ -7,7 +7,7 @@
 
 pub mod flatpak;
 
-pub use flatpak::{FlatpakBackend, has_flatpak, list_installed};
+pub use flatpak::{FlatpakBackend, has_flatpak, list_installed, search_flatpak_with_config};
 
 use crate::model::Package;
 
@@ -24,8 +24,15 @@ pub trait SourceBackend {
     /// Installed packages for remover/stats paths. Empty when unavailable.
     fn list_installed(&self) -> anyhow::Result<Vec<Package>>;
 
-    /// P2: query remote. Default empty so P1 compiles before search lands.
-    fn search(&self, _query: &str, _limit: usize) -> anyhow::Result<Vec<Package>> {
+    /// P2: query remote. Empty when unavailable/disabled (fail-open).
+    fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        use_regex: bool,
+        cfg: &crate::config::Config,
+    ) -> anyhow::Result<Vec<Package>> {
+        let _ = (query, limit, use_regex, cfg);
         Ok(vec![])
     }
 

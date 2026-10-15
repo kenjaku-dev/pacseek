@@ -3,7 +3,7 @@
 
 [search]
 limit = 50
-source = "all"
+source = "all"           # aur|repo|flatpak|all
 by = "name-desc"
 regex = false
 installed_only = false

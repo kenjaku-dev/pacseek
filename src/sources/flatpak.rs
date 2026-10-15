@@ -70,6 +70,16 @@ impl SourceBackend for FlatpakBackend {
     fn list_installed(&self) -> anyhow::Result<Vec<Package>> {
         list_installed()
     }
+
+    fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        use_regex: bool,
+        cfg: &crate::config::Config,
+    ) -> anyhow::Result<Vec<Package>> {
+        search_flatpak_with_config(query, limit, use_regex, cfg)
+    }
 }
 
 /// `which flatpak` probe. No output parsing, exit status only.
@@ -217,6 +227,108 @@ pub fn parse_remote_list(output: &str) -> Vec<String> {
         .collect()
 }
 
+/// JSON row from `flatpak search --json`.
+#[derive(Debug, Clone, Deserialize)]
+struct FlatpakSearchRow {
+    #[serde(default, rename = "application_id")]
+    application_id: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    remotes: Option<String>,
+}
+
+/// Parse `flatpak search --json`. Pure, never panics: garbage -> empty, rows
+/// without `application_id` skipped, empty version -> `"?"`. Remote relevance
+/// order preserved (no re-sort); `limit` truncates (0 = no limit).
+pub fn parse_flatpak_search_json(text: &str, limit: usize) -> Vec<Package> {
+    let rows: Vec<FlatpakSearchRow> = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    let mut out = Vec::new();
+    for r in rows {
+        let Some(app_id) = r
+            .application_id
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let version = r
+            .version
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "?".to_string());
+        let mut pkg = Package::minimal(app_id, version, "flatpak".to_string());
+        pkg.installed = false;
+        pkg.description = r.description.or(r.name);
+        if let Some(rem) = r
+            .remotes
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            pkg.url = Some(format!("flatpak:{rem}"));
+        }
+        if let Some(b) = r
+            .branch
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            && b != "stable"
+        {
+            pkg.version = format!("{} ({})", pkg.version, b);
+        }
+        out.push(pkg);
+        if limit != 0 && out.len() >= limit {
+            break;
+        }
+    }
+    out
+}
+
+/// Live search: `flatpak search <query> --json`, bounded by
+/// `cfg.search.timeout_secs`. Fail-open `Ok(empty)` when disabled, binary
+/// missing, query empty, or timeout — mirrors AUR graceful degradation.
+/// `use_regex` filters client-side on app-id + description (flatpak has no
+/// server-side regex); invalid regex is an Err like the AUR path.
+pub fn search_flatpak_with_config(
+    query: &str,
+    limit: usize,
+    use_regex: bool,
+    cfg: &crate::config::Config,
+) -> anyhow::Result<Vec<Package>> {
+    if !cfg.flatpak_enabled() || !has_flatpak() || query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let timeout = Duration::from_secs(cfg.search.timeout_secs.max(1));
+    let Some(out) = run_flatpak(&["search", query.trim(), "--json"], timeout) else {
+        return Ok(vec![]);
+    };
+    let mut pkgs = parse_flatpak_search_json(&out, limit);
+    if use_regex {
+        let re = regex::RegexBuilder::new(query.trim())
+            .case_insensitive(true)
+            .build()?;
+        pkgs.retain(|p| {
+            re.is_match(&p.name)
+                || p.description
+                    .as_deref()
+                    .map(|d| re.is_match(d))
+                    .unwrap_or(false)
+        });
+        if limit != 0 && pkgs.len() > limit {
+            pkgs.truncate(limit);
+        }
+    }
+    Ok(pkgs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +408,56 @@ mod tests {
         let pkgs = list_installed().unwrap_or_default();
         // Machine has flatpaks; off-Arch CI skips via early return above.
         assert!(pkgs.iter().all(|p| p.repo == "flatpak" && p.installed));
+    }
+
+    const SEARCH_JSON: &str = r#"[
+      {"name":"Firefox","description":"Fast, Private & Safe Web Browser","application_id":"org.mozilla.firefox","version":"158.0","branch":"stable","remotes":"flathub"},
+      {"name":"Nvidia VAAPI driver","description":"VA-API","application_id":"org.freedesktop.Platform.VAAPI.nvidia","version":"","branch":"26.08","remotes":"flathub"},
+      {"name":"NoId","version":"1.0"}
+    ]"#;
+
+    #[test]
+    fn parse_search_json_fields_limit_order() {
+        let pkgs = parse_flatpak_search_json(SEARCH_JSON, 0);
+        assert_eq!(pkgs.len(), 2);
+        // Remote relevance order preserved (firefox first).
+        assert_eq!(pkgs[0].name, "org.mozilla.firefox");
+        assert_eq!(pkgs[0].version, "158.0");
+        assert!(!pkgs[0].installed);
+        let vaapi = &pkgs[1];
+        assert_eq!(vaapi.version, "? (26.08)");
+        let one = parse_flatpak_search_json(SEARCH_JSON, 1);
+        assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn parse_search_json_garbage_is_empty() {
+        assert!(parse_flatpak_search_json("", 0).is_empty());
+        assert!(parse_flatpak_search_json("nope", 0).is_empty());
+        assert!(parse_flatpak_search_json("null", 0).is_empty());
+    }
+
+    #[test]
+    fn search_empty_query_is_empty_without_spawning() {
+        let cfg = crate::config::Config::default();
+        let pkgs = search_flatpak_with_config("   ", 50, false, &cfg).unwrap();
+        assert!(pkgs.is_empty());
+    }
+
+    #[test]
+    fn search_disabled_is_empty() {
+        let mut cfg = crate::config::Config::default();
+        cfg.behavior.flatpak_enabled = false;
+        let pkgs = search_flatpak_with_config("firefox", 50, false, &cfg).unwrap();
+        assert!(pkgs.is_empty());
+    }
+
+    #[test]
+    fn search_invalid_regex_is_err() {
+        if !has_flatpak() {
+            return;
+        }
+        let cfg = crate::config::Config::default();
+        assert!(search_flatpak_with_config("([", 50, true, &cfg).is_err());
     }
 }

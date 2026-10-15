@@ -187,3 +187,48 @@ fn readonly_refuses_clean() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+fn flatpak_present() -> bool {
+    std::process::Command::new("which")
+        .arg("flatpak")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[test]
+fn flatpak_source_json_is_valid() {
+    // Needs flatpak binary; skip gracefully off-machine.
+    if !flatpak_present() {
+        return;
+    }
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd
+        .args(["firefox", "--source", "flatpak", "--limit", "3", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("flatpak json valid");
+    let arr = v.as_array().expect("flatpak json is array");
+    assert!(
+        arr.iter()
+            .all(|p| p.get("repo").and_then(|r| r.as_str()) == Some("flatpak"))
+    );
+}
+
+#[test]
+fn flatpak_source_respects_limit() {
+    if !flatpak_present() {
+        return;
+    }
+    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let output = cmd
+        .args(["firefox", "--source", "flatpak", "--limit", "1", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("flatpak json valid");
+    assert!(v.as_array().map(|a| a.len() <= 1).unwrap_or(false));
+}

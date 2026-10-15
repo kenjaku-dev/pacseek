@@ -46,6 +46,11 @@ fn sample_packages() -> Vec<Package> {
             reason: None,
             orphan: false,
         },
+        Package::minimal(
+            "org.mozilla.firefox".into(),
+            "158.0".into(),
+            "flatpak".into(),
+        ),
     ]
 }
 
@@ -57,7 +62,7 @@ fn tui_renders_search_and_results() {
     app.packages = sample_packages();
     app.list_state.select(Some(0));
     app.focus = Focus::List;
-    app.status = "Found 2 (repo 1 aur 1)".into();
+    app.status = "Found 3 (repo 1 aur 1 flatpak 1)".into();
     app.is_loading = false;
 
     terminal.draw(|f| pacseek::tui::ui::draw(f, &app)).unwrap();
@@ -76,7 +81,8 @@ fn tui_renders_search_and_results() {
     assert!(lines.iter().any(|l| l.contains("Search")));
     assert!(lines.iter().any(|l| l.contains("Results")));
     assert!(lines.iter().any(|l| l.contains("firefox")));
-    assert!(lines.iter().any(|l| l.contains("Found 2")));
+    assert!(lines.iter().any(|l| l.contains("Found 3")));
+    assert!(lines.iter().any(|l| l.contains("flatpak")));
 }
 
 #[test]
