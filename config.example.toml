@@ -65,4 +65,6 @@ news_cache_secs = 86400
 upgrade_noconfirm = false
 clean_keep = 2
 clean_noconfirm = false
+flatpak_enabled = true
+# flatpak_remote = "flathub"
 # diff_pager = "auto"

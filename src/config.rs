@@ -255,6 +255,13 @@ pub struct BehaviorConfig {
     /// 5.1: non-interactive clean (sudo -n fails fast instead of prompting).
     #[serde(default)]
     pub clean_noconfirm: bool,
+    /// P1 flatpak seam: enable flatpak backend (default true; fail-open when
+    /// the `flatpak` binary is absent).
+    #[serde(default = "default_true")]
+    pub flatpak_enabled: bool,
+    /// P1 flatpak seam: remote used for install/search (default flathub).
+    #[serde(default)]
+    pub flatpak_remote: Option<String>,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -276,6 +283,8 @@ impl Default for BehaviorConfig {
             upgrade_noconfirm: false,
             clean_keep: default_clean_keep(),
             clean_noconfirm: false,
+            flatpak_enabled: true,
+            flatpak_remote: None,
         }
     }
 }
@@ -422,6 +431,8 @@ news_cache_secs = 86400    # news feed cache TTL
 upgrade_noconfirm = false  # add --noconfirm to system upgrade
 clean_keep = 2             # paccache -k: versions to keep on --clean (min 1)
 clean_noconfirm = false    # non-interactive clean (sudo -n, fails fast)
+flatpak_enabled = true     # P1 seam: flatpak backend (fail-open when binary absent)
+# flatpak_remote = "flathub" # P1 seam: remote for install/search
 "#
         .into()
     }
@@ -647,6 +658,22 @@ impl Config {
     pub fn news_enabled(&self) -> bool {
         self.behavior.news_enabled
     }
+    /// P1 flatpak seam: backend enabled (config; binary presence checked
+    /// separately via `sources::has_flatpak()` so disabled/off-Arch is
+    /// fail-open empty).
+    pub fn flatpak_enabled(&self) -> bool {
+        self.behavior.flatpak_enabled
+    }
+    /// P1 flatpak seam: remote name, `flathub` unless overridden with a
+    /// non-empty `[behavior] flatpak_remote`.
+    pub fn flatpak_remote_name(&self) -> String {
+        self.behavior
+            .flatpak_remote
+            .clone()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "flathub".to_string())
+    }
 }
 
 #[cfg(test)]
@@ -667,6 +694,20 @@ mod tests {
         let st = parse_style("cyan bold");
         assert_eq!(st.fg, Some(Color::Cyan));
         assert!(st.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn flatpak_defaults_and_remote_override() {
+        let cfg = Config::default();
+        assert!(cfg.flatpak_enabled());
+        assert_eq!(cfg.flatpak_remote_name(), "flathub");
+        let mut custom = Config::default();
+        custom.behavior.flatpak_remote = Some("  myremote  ".into());
+        assert_eq!(custom.flatpak_remote_name(), "myremote");
+        custom.behavior.flatpak_remote = Some("   ".into());
+        assert_eq!(custom.flatpak_remote_name(), "flathub");
+        custom.behavior.flatpak_enabled = false;
+        assert!(!custom.flatpak_enabled());
     }
 
     #[test]
