@@ -63,7 +63,9 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Remove an installed package (sudo pacman -R) and exit — non-TUI shortcut for remover mode.
+    /// Remove an installed package and exit — non-TUI shortcut for remover mode.
+    /// Auto-detects flatpak app-IDs (reverse-DNS installed via flatpak) and
+    /// uninstalls without sudo; otherwise sudo pacman -R.
     /// Asks to confirm on TTY; bypass with PACSEEK_NOCONFIRM=1 (also skips makepkg/refresh prompts).
     #[arg(long, value_name = "PKG")]
     pub remove: Option<String>,

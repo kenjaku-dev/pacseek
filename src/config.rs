@@ -262,6 +262,9 @@ pub struct BehaviorConfig {
     /// P1 flatpak seam: remote used for install/search (default flathub).
     #[serde(default)]
     pub flatpak_remote: Option<String>,
+    /// P3: non-interactive flatpak install/remove/clean (`-y`).
+    #[serde(default)]
+    pub flatpak_noconfirm: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -285,6 +288,7 @@ impl Default for BehaviorConfig {
             clean_noconfirm: false,
             flatpak_enabled: true,
             flatpak_remote: None,
+            flatpak_noconfirm: false,
         }
     }
 }
@@ -433,6 +437,7 @@ clean_keep = 2             # paccache -k: versions to keep on --clean (min 1)
 clean_noconfirm = false    # non-interactive clean (sudo -n, fails fast)
 flatpak_enabled = true     # P1 seam: flatpak backend (fail-open when binary absent)
 # flatpak_remote = "flathub" # P1 seam: remote for install/search
+flatpak_noconfirm = false    # P3: -y for flatpak install/remove/clean
 "#
         .into()
     }
@@ -675,6 +680,11 @@ impl Config {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "flathub".to_string())
     }
+    /// P3: `-y` for flatpak install/remove/clean (config or env, same as the
+    /// pacman noconfirm flags).
+    pub fn flatpak_noconfirm(&self) -> bool {
+        self.behavior.flatpak_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+    }
 }
 
 #[cfg(test)]
@@ -709,6 +719,14 @@ mod tests {
         assert_eq!(custom.flatpak_remote_name(), "flathub");
         custom.behavior.flatpak_enabled = false;
         assert!(!custom.flatpak_enabled());
+    }
+
+    #[test]
+    fn flatpak_noconfirm_gate() {
+        let mut cfg = Config::default();
+        assert!(!cfg.flatpak_noconfirm());
+        cfg.behavior.flatpak_noconfirm = true;
+        assert!(cfg.flatpak_noconfirm());
     }
 
     #[test]

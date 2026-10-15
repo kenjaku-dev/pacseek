@@ -1107,15 +1107,19 @@ impl App {
             self.dirty = true;
             return Ok(());
         }
-        // Suspend TUI and run pacman / makepkg per aur-guides + tui-design lifecycle
+        // Suspend TUI and run pacman / makepkg / flatpak per aur-guides + tui-design lifecycle
         let pkg_clone = pkg.clone();
         let is_aur = pkg.repo == "aur";
+        let is_flatpak = pkg.repo == "flatpak";
         let name = pkg.name.clone();
         let name_for_closure = name.clone();
+        let cfg_for_closure = self.config.clone();
 
         // Prepare install function that runs outside TUI
         let install_result = super::super::tui::suspend_and_run(terminal, move || {
-            if is_aur {
+            if is_flatpak {
+                crate::sources::install_flatpak_package(&name_for_closure, &cfg_for_closure)
+            } else if is_aur {
                 crate::install::aur::install_aur_package(&pkg_clone)
             } else {
                 crate::install::repo::install_repo_package(&name_for_closure)
@@ -1151,15 +1155,25 @@ impl App {
         let name_for_closure = name.clone();
         let cfg = self.config.clone();
         let flag_preview = cfg.remove_flag_arg();
+        let is_flatpak = pkg.repo == "flatpak";
 
         let remove_result = super::super::tui::suspend_and_run(terminal, move || {
-            crate::install::remove::remove_package_with_config(&name_for_closure, &cfg)
+            if is_flatpak {
+                crate::sources::remove_flatpak_package(&name_for_closure, &cfg)
+            } else {
+                crate::install::remove::remove_package_with_config(&name_for_closure, &cfg)
+            }
         });
 
         match remove_result {
             Ok(()) => {
-                self.status = format!("Removed {} ({})", name, flag_preview);
-                self.popup = Popup::Message(format!("✓ Removed {} ({})", name, flag_preview));
+                let marker = if is_flatpak {
+                    "flatpak"
+                } else {
+                    flag_preview.as_str()
+                };
+                self.status = format!("Removed {} ({})", name, marker);
+                self.popup = Popup::Message(format!("✓ Removed {} ({})", name, marker));
             }
             Err(e) => {
                 self.status = format!("Remove failed: {}", e);
@@ -1830,6 +1844,16 @@ mod tests {
         let _ = app.do_install(pkg.clone(), &mut terminal);
         assert!(matches!(app.popup, Popup::Message(_)));
         let _ = app.do_remove(pkg, &mut terminal);
+        assert!(matches!(app.popup, Popup::Message(_)));
+        // P3: flatpak rows refuse identically without spawning flatpak.
+        let fp = crate::model::Package::minimal(
+            "org.mozilla.firefox".into(),
+            "158.0".into(),
+            "flatpak".into(),
+        );
+        let _ = app.do_install(fp.clone(), &mut terminal);
+        assert!(matches!(app.popup, Popup::Message(_)));
+        let _ = app.do_remove(fp, &mut terminal);
         assert!(matches!(app.popup, Popup::Message(_)));
         let _ = app.do_upgrade(&mut terminal);
         assert!(matches!(app.popup, Popup::Message(_)));

@@ -80,6 +80,14 @@ impl SourceBackend for FlatpakBackend {
     ) -> anyhow::Result<Vec<Package>> {
         search_flatpak_with_config(query, limit, use_regex, cfg)
     }
+
+    fn install(&self, id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+        install_flatpak_package(id, cfg)
+    }
+
+    fn remove(&self, id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+        remove_flatpak_package(id, cfg)
+    }
 }
 
 /// `which flatpak` probe. No output parsing, exit status only.
@@ -225,6 +233,174 @@ pub fn parse_remote_list(output: &str) -> Vec<String> {
         .map(|l| l.split('\t').next().unwrap_or("").trim().to_string())
         .filter(|s| !s.is_empty() && s != "Name")
         .collect()
+}
+
+/// Validate a flatpak application ID (reverse-DNS, e.g. `org.mozilla.firefox`).
+/// Same traversal/NUL policy as the pacman paths; dots required (at least
+/// one) since bare words are never valid flatpak IDs. Returns trimmed id.
+pub fn validate_app_id(id: &str) -> anyhow::Result<String> {
+    let id = id.trim();
+    if id.is_empty() {
+        anyhow::bail!("empty application id");
+    }
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
+        anyhow::bail!("invalid application id: {:?}", id);
+    }
+    if !id.contains('.') {
+        anyhow::bail!(
+            "invalid application id (need reverse-DNS like org.mozilla.firefox): {:?}",
+            id
+        );
+    }
+    if id.starts_with('.') || id.starts_with('-') || id.ends_with('.') || id.ends_with('-') {
+        anyhow::bail!("invalid application id: {:?}", id);
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        anyhow::bail!("invalid application id: {:?}", id);
+    }
+    Ok(id.to_string())
+}
+
+/// Args for `flatpak install` after the binary name, extracted for unit
+/// testing without spawning. No sudo — flatpak never needs it. `-y` only with
+/// noconfirm (scripts / PACSEEK_NOCONFIRM=1); otherwise flatpak asks.
+pub fn install_command_args(remote: &str, id: &str, noconfirm: bool) -> Vec<String> {
+    let mut args = vec!["install".to_string(), remote.to_string(), id.to_string()];
+    if noconfirm {
+        args.push("-y".to_string());
+    }
+    args
+}
+
+/// Args for `flatpak uninstall`. Same `-y` policy as install.
+pub fn remove_command_args(id: &str, noconfirm: bool) -> Vec<String> {
+    let mut args = vec!["uninstall".to_string(), id.to_string()];
+    if noconfirm {
+        args.push("-y".to_string());
+    }
+    args
+}
+
+/// Args for unused-runtime cleanup (`flatpak uninstall --unused`).
+pub fn unused_command_args(noconfirm: bool) -> Vec<String> {
+    let mut args = vec!["uninstall".to_string(), "--unused".to_string()];
+    if noconfirm {
+        args.push("-y".to_string());
+    }
+    args
+}
+
+/// True when `id` is installed (`flatpak info` probe, 10s bound).
+/// Missing binary -> false (fail-open).
+pub fn is_flatpak_installed(id: &str) -> bool {
+    if !has_flatpak() || validate_app_id(id).is_err() {
+        return false;
+    }
+    let id_owned = id.trim().to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ok = Command::new("flatpak")
+            .args(["info", id_owned.as_str()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let _ = tx.send(ok);
+    });
+    rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false)
+}
+
+/// Install a flatpak app with inherited stdio so the user sees progress.
+/// No sudo. Caller owns confirmation; readonly refused here (defense in depth).
+pub fn install_flatpak_package(id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+    let id = validate_app_id(id)?;
+    if cfg.is_readonly() {
+        anyhow::bail!("refusing to install: readonly mode is enabled");
+    }
+    if !has_flatpak() {
+        anyhow::bail!("flatpak not found — install flatpak to manage flatpak apps");
+    }
+    let remote = cfg.flatpak_remote_name();
+    if !flatpak_remote_exists(&remote) {
+        anyhow::bail!(
+            "flatpak remote '{remote}' not found — add it or set [behavior] flatpak_remote"
+        );
+    }
+    let args = install_command_args(&remote, &id, cfg.flatpak_noconfirm());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let status = Command::new("flatpak")
+        .args(&refs)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run flatpak install: {e}"))?;
+    if !status.success() {
+        anyhow::bail!(
+            "flatpak install failed with exit {}",
+            status.code().unwrap_or(-1)
+        );
+    }
+    Ok(())
+}
+
+/// Uninstall a flatpak app. Same safety/stdio contract as install.
+pub fn remove_flatpak_package(id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+    let id = validate_app_id(id)?;
+    if cfg.is_readonly() {
+        anyhow::bail!("refusing to remove: readonly mode is enabled");
+    }
+    if !has_flatpak() {
+        anyhow::bail!("flatpak not found — install flatpak to manage flatpak apps");
+    }
+    if !is_flatpak_installed(&id) {
+        anyhow::bail!("flatpak app '{id}' is not installed");
+    }
+    let args = remove_command_args(&id, cfg.flatpak_noconfirm());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let status = Command::new("flatpak")
+        .args(&refs)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run flatpak uninstall: {e}"))?;
+    if !status.success() {
+        anyhow::bail!(
+            "flatpak uninstall failed with exit {}",
+            status.code().unwrap_or(-1)
+        );
+    }
+    Ok(())
+}
+
+/// Remove unused runtimes (`flatpak uninstall --unused`). No preview exists
+/// server-side, so callers confirm first (same TTY/exit-2 contract as clean).
+pub fn clean_unused_flatpak(cfg: &crate::config::Config) -> anyhow::Result<()> {
+    if cfg.is_readonly() {
+        anyhow::bail!("refusing to clean: readonly mode is enabled");
+    }
+    if !has_flatpak() {
+        anyhow::bail!("flatpak not found — install flatpak to manage flatpak apps");
+    }
+    let args = unused_command_args(cfg.flatpak_noconfirm());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let status = Command::new("flatpak")
+        .args(&refs)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run flatpak uninstall --unused: {e}"))?;
+    if !status.success() {
+        anyhow::bail!(
+            "flatpak uninstall --unused failed with exit {}",
+            status.code().unwrap_or(-1)
+        );
+    }
+    Ok(())
 }
 
 /// JSON row from `flatpak search --json`.
@@ -459,5 +635,81 @@ mod tests {
         }
         let cfg = crate::config::Config::default();
         assert!(search_flatpak_with_config("([", 50, true, &cfg).is_err());
+    }
+
+    #[test]
+    fn validate_app_id_shapes() {
+        assert!(validate_app_id("org.mozilla.firefox").is_ok());
+        assert!(validate_app_id("  org.cutwire.Drift  ").is_ok());
+        assert_eq!(
+            validate_app_id("  org.cutwire.Drift  ").unwrap(),
+            "org.cutwire.Drift"
+        );
+        for bad in [
+            "",
+            "   ",
+            "firefox",
+            "../evil",
+            "a/b",
+            "a\\b",
+            ".leading",
+            "trailing.",
+            "has space",
+            "semi;colon",
+            "foo\0bar",
+            "a..b",
+        ] {
+            assert!(validate_app_id(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn install_args_no_sudo_confirm_gated() {
+        let plain = install_command_args("flathub", "org.mozilla.firefox", false);
+        assert_eq!(plain, vec!["install", "flathub", "org.mozilla.firefox"]);
+        assert!(!plain.iter().any(|a| a == "sudo"));
+        let nc = install_command_args("flathub", "org.mozilla.firefox", true);
+        assert_eq!(nc.last().map(|s| s.as_str()), Some("-y"));
+    }
+
+    #[test]
+    fn remove_args_no_sudo_confirm_gated() {
+        let plain = remove_command_args("org.mozilla.firefox", false);
+        assert_eq!(plain, vec!["uninstall", "org.mozilla.firefox"]);
+        assert!(!plain.iter().any(|a| a == "sudo"));
+        let nc = remove_command_args("org.mozilla.firefox", true);
+        assert!(nc.contains(&"-y".to_string()));
+        let unused = unused_command_args(true);
+        assert_eq!(unused, vec!["uninstall", "--unused", "-y"]);
+        assert!(!unused_command_args(false).contains(&"-y".to_string()));
+    }
+
+    #[test]
+    fn readonly_refuses_mutation_without_spawning() {
+        let mut cfg = crate::config::Config::default();
+        cfg.behavior.readonly = true;
+        assert!(install_flatpak_package("org.mozilla.firefox", &cfg).is_err());
+        assert!(remove_flatpak_package("org.mozilla.firefox", &cfg).is_err());
+        assert!(clean_unused_flatpak(&cfg).is_err());
+    }
+
+    #[test]
+    fn invalid_id_never_spawns() {
+        let cfg = crate::config::Config::default();
+        assert!(install_flatpak_package("not-an-app-id", &cfg).is_err());
+        assert!(remove_flatpak_package("", &cfg).is_err());
+        assert!(!is_flatpak_installed("not-an-app-id"));
+        assert!(!is_flatpak_installed("definitely.not.installed.xyz"));
+    }
+
+    #[test]
+    fn backend_trait_delegates_to_runners() {
+        // Invalid id errors surface through the trait (no silent success).
+        let cfg = crate::config::Config::default();
+        let b = FlatpakBackend::new("flathub".to_string(), true);
+        assert!(b.install("bad", &cfg).is_err());
+        assert!(b.remove("bad", &cfg).is_err());
+        assert!(b.check_updates().unwrap().is_empty());
+        assert!(b.search("", 10, false, &cfg).unwrap().is_empty());
     }
 }

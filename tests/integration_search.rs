@@ -124,6 +124,7 @@ fn stats_valid_json() {
 fn readonly_refuses_mutating_ops() {
     for args in [
         vec!["--readonly", "--remove", "vim"],
+        vec!["--readonly", "--remove", "org.mozilla.firefox"],
         vec!["--readonly", "--refresh"],
         vec!["--readonly", "--upgrade"],
     ] {

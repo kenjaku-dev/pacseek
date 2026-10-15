@@ -7,7 +7,11 @@
 
 pub mod flatpak;
 
-pub use flatpak::{FlatpakBackend, has_flatpak, list_installed, search_flatpak_with_config};
+pub use flatpak::{
+    FlatpakBackend, clean_unused_flatpak, has_flatpak, install_flatpak_package,
+    is_flatpak_installed, list_installed, remove_flatpak_package, search_flatpak_with_config,
+    validate_app_id,
+};
 
 use crate::model::Package;
 
@@ -38,12 +42,14 @@ pub trait SourceBackend {
 
     /// P3: install by backend-native id. Default refuses so wiring without an
     /// impl cannot silently succeed.
-    fn install(&self, _id: &str) -> anyhow::Result<()> {
+    fn install(&self, id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+        let _ = (id, cfg);
         anyhow::bail!("install not implemented for this backend")
     }
 
     /// P3: remove by backend-native id.
-    fn remove(&self, _id: &str) -> anyhow::Result<()> {
+    fn remove(&self, id: &str, cfg: &crate::config::Config) -> anyhow::Result<()> {
+        let _ = (id, cfg);
         anyhow::bail!("remove not implemented for this backend")
     }
 

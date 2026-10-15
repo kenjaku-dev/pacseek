@@ -273,16 +273,25 @@ async fn main() -> anyhow::Result<()> {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let noconfirm = cfg.remove_noconfirm();
+        // P3: flatpak app-IDs (reverse-DNS, installed via flatpak) uninstall
+        // without sudo. Shape + installed-state gate avoids misrouting pacman
+        // names; readonly already refused above.
+        let is_flatpak = cfg.flatpak_enabled()
+            && pacseek::sources::validate_app_id(&name).is_ok()
+            && pacseek::sources::is_flatpak_installed(&name);
+        // Either noconfirm flag covers --remove end-to-end (flatpak -y and
+        // pacman --noconfirm alike) so scripts need only one knob.
+        let noconfirm = cfg.remove_noconfirm() || (is_flatpak && cfg.flatpak_noconfirm());
         if should_confirm(noconfirm, std::io::stdin().is_terminal()) {
             let stdin = std::io::stdin();
             let mut input = stdin.lock();
             let mut output = std::io::stderr();
-            if !confirm_prompt(
-                &format!("Remove '{}'?", name.trim()),
-                &mut input,
-                &mut output,
-            ) {
+            let prompt = if is_flatpak {
+                format!("Remove flatpak '{}'?", name.trim())
+            } else {
+                format!("Remove '{}'?", name.trim())
+            };
+            if !confirm_prompt(&prompt, &mut input, &mut output) {
                 eprintln!("cancelled");
                 return Ok(());
             }
@@ -292,7 +301,17 @@ async fn main() -> anyhow::Result<()> {
             );
             std::process::exit(2);
         }
-        match pacseek::install::remove::remove_package_with_config(&name, &cfg) {
+        // flatpak -y follows the same noconfirm so scripts behave identically.
+        let res = if is_flatpak {
+            let mut cfg_fp = cfg.clone();
+            if noconfirm {
+                cfg_fp.behavior.flatpak_noconfirm = true;
+            }
+            pacseek::sources::remove_flatpak_package(&name, &cfg_fp)
+        } else {
+            pacseek::install::remove::remove_package_with_config(&name, &cfg)
+        };
+        match res {
             Ok(()) => {
                 println!("Removed {}", name.trim());
                 return Ok(());

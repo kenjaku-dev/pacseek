@@ -67,4 +67,5 @@ clean_keep = 2
 clean_noconfirm = false
 flatpak_enabled = true
 # flatpak_remote = "flathub"
+flatpak_noconfirm = false
 # diff_pager = "auto"
