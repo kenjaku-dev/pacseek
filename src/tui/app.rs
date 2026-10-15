@@ -874,10 +874,19 @@ impl App {
             let (tx, rx) = mpsc::channel();
             self.search_rx = Some(rx);
             thread::spawn(move || {
+                // P1 perf: per-backend timings for the serial update checks.
+                let timer = crate::timing::start("tui-repo-updates");
                 let mut all = crate::updates::check_repo_updates().unwrap_or_default();
-                all.extend(crate::updates::check_aur_updates_blocking(&cfg));
+                timer.finish(all.len());
+                let timer = crate::timing::start("tui-aur-updates");
+                let aur = crate::updates::check_aur_updates_blocking(&cfg);
+                timer.finish(aur.len());
+                all.extend(aur);
                 // Flatpak via remote-info memo (fail-open empty when disabled).
-                all.extend(crate::sources::check_flatpak_updates_cached(&cfg));
+                let timer = crate::timing::start("tui-flatpak-updates");
+                let fp = crate::sources::check_flatpak_updates_cached(&cfg);
+                timer.finish(fp.len());
+                all.extend(fp);
                 all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
                 // Filter by input (name substring, or regex when enabled).
                 let filtered: Vec<crate::updates::PkgUpdate> = if query_clone.is_empty() {
@@ -1034,9 +1043,13 @@ impl App {
                 None
             } else {
                 Some(thread::spawn(move || {
-                    crate::search::repo::search_repo(&q1, limit, use_regex, installed_only)
-                        .or_else(|_| crate::search::repo::search_repo_fallback(&q1, limit))
-                        .unwrap_or_default()
+                    let timer = crate::timing::start("tui-repo-search");
+                    let out: Vec<Package> =
+                        crate::search::repo::search_repo(&q1, limit, use_regex, installed_only)
+                            .or_else(|_| crate::search::repo::search_repo_fallback(&q1, limit))
+                            .unwrap_or_default();
+                    timer.finish(out.len());
+                    out
                 }))
             };
             let q2 = query_clone.clone();
@@ -1045,11 +1058,15 @@ impl App {
                 None
             } else {
                 Some(thread::spawn(move || {
-                    search_aur_blocking_with_config(&q2, &aur_by_str, limit, use_regex, &cfg2)
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(err=?e, "AUR blocking search failed");
-                            vec![]
-                        })
+                    let timer = crate::timing::start("tui-aur-search");
+                    let out: Vec<Package> =
+                        search_aur_blocking_with_config(&q2, &aur_by_str, limit, use_regex, &cfg2)
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(err=?e, "AUR blocking search failed");
+                                vec![]
+                            });
+                    timer.finish(out.len());
+                    out
                 }))
             };
             let q3 = query_clone.clone();
@@ -1058,14 +1075,20 @@ impl App {
                 None
             } else {
                 Some(thread::spawn(move || {
-                    crate::sources::search_flatpak_with_config(&q3, limit, use_regex, &cfg3)
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(err=?e, "flatpak search failed");
-                            vec![]
-                        })
+                    let timer = crate::timing::start("tui-flatpak-search");
+                    let out: Vec<Package> =
+                        crate::sources::search_flatpak_with_config(&q3, limit, use_regex, &cfg3)
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(err=?e, "flatpak search failed");
+                                vec![]
+                            });
+                    timer.finish(out.len());
+                    out
                 }))
             };
+            let total_timer = crate::timing::start("tui-search-total");
 
+            // P1 perf: per-backend timings (TUI logs to file; slow calls warn).
             let repo_res = repo_handle
                 .map(|h| match h.join() {
                     Ok(v) => v,
@@ -1093,6 +1116,12 @@ impl App {
                     }
                 })
                 .unwrap_or_default();
+            total_timer.finish(
+                repo_res
+                    .len()
+                    .saturating_add(aur_res.len())
+                    .saturating_add(flatpak_res.len()),
+            );
 
             let mut combined =
                 Vec::with_capacity(repo_res.len() + aur_res.len() + flatpak_res.len());

@@ -19,7 +19,7 @@ One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc
 - `rust 1.85+` (MSRV 1.88 for `ratatui 0.30`), `edition 2024`, `tokio` (`rt-multi-thread` + `macros`), `reqwest 0.12` (json+rustls+blocking via OnceLock), `alpm 5` + `pacmanconf 3`, `clap 4.5` derive, `serde`/`serde_json`/`toml 0.8`, `anyhow`/`thiserror`, `colored 2`, `indicatif 0.17`, `tracing 0.1`, `regex 1`, `url 2`
 - TUI: `ratatui 0.30` `crossterm 0.29` `tui-input 0.15` `color-eyre 0.6` `dirs 5` `nix 0.29` `unicode-width 0.2` `signal-hook 0.3`
 - Config: `~/.config/pacseek/config.toml` + `./pacseek.toml` project-local, `[search]/[tui]/[theme]/[behavior]` via `crate::config::Config` (serde TOML, defaults < file < env < CLI)
-- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.3M** `target/release/pacseek`, `dev` `opt-level 0`
+- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.4M** `target/release/pacseek`, `dev` `opt-level 0`
 
 ## Architecture
 ```
@@ -62,7 +62,7 @@ tests/
 ```bash
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
-cargo test # 131/131 (lib 96, aur_nan 2, integration 16, tui_snapshot 17) + doc 0
+cargo test # 135/135 (lib 99, aur_nan 2, integration 17, tui_snapshot 17) + doc 0
 pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
 pacseek --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
@@ -74,7 +74,7 @@ cargo run -- --stats            # incl. Flatpak apps/updates
 cargo run -- --clean --dry-run # preview reclaimable cache (paccache -k2) + flatpak note
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
-cargo build --release # 5.3M stripped
+cargo build --release # 5.4M stripped
 cargo install --path . --force # ~/.cargo/bin/pacseek 0.6.0
 ```
 
@@ -96,7 +96,8 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.6.0
 - **K** `0.4.1`: orphan-spin watchdog fix — tag `v0.4.1`
 - **L** `0.5.0`: maintenance+safety — Updates tab + `--updates/--upgrade` (vercmp + AUR info, news guard), orphans (`-Qdt`, `o` filter, `--orphans`), stats (`--stats`), PKGBUILD diff preview, badges `[OOD]/[ORPHAN]/[UNMAINTAINED]` + deps in info, readonly mode — 85 tests, 5.3M
 - **M** `0.5.1`: cache cleaner + paper cuts — `--clean [--keep N] [--dry-run]` (paccache `-d` preview parse, `sudo -r` run) + TUI `c` + ConfirmClean popup, real RFC2822 news dates, inline upgrade warning (no two-`U` dance), AUR memo 5min + F5 invalidate, recursive cache sizes, fetch-before-diff (15s bound), BackTab reverse, `U` scoped to Updates, condensed help popup — 104 tests, 5.3M
-- **N** current `0.6.0`: flatpak backend in 5 phases — P1 `sources/` seam + detect/list (`--json` parsers, `flatpak_enabled/remote` config), P2 `Source::Flatpak` search fan-out (CLI tokio + TUI workers, `print_packages` 3-slice, `Found (repo aur flatpak)`), P3 install/remove without sudo (app-id validator, TUI routing by `repo`, CLI `--remove` auto-detect, `flatpak_noconfirm`), P4 updates+upgrade (`remote-info` version check + 5min memo, `--updates/--stats/--upgrade` incl. flatpak, Updates-tab worker, installed-row → `flatpak update`), P5 `--clean` also drops unused runtimes (CLI both-stages + TUI popup flag) — 131 tests, 5.3M
+- **N** `0.6.0`: flatpak backend in 5 phases — P1 `sources/` seam + detect/list (`--json` parsers, `flatpak_enabled/remote` config), P2 `Source::Flatpak` search fan-out (CLI tokio + TUI workers, `print_packages` 3-slice, `Found (repo aur flatpak)`), P3 install/remove without sudo (app-id validator, TUI routing by `repo`, CLI `--remove` auto-detect, `flatpak_noconfirm`), P4 updates+upgrade (`remote-info` version check + 5min memo, `--updates/--stats/--upgrade` incl. flatpak, Updates-tab worker, installed-row → `flatpak update`), P5 `--clean` also drops unused runtimes (CLI both-stages + TUI popup flag) — 131 tests, 5.4M
+- **O** current perf P1 (measure): `src/timing.rs` BackendTimer (warn >2000ms, info otherwise) on all 5 fan-outs (CLI search/updates/stats, TUI search/updates workers); fixed 2 real bugs found by instrumenting — logs wrote to stdout (broke `--json` pipes) now stderr, and `--updates/--stats` exited before tracing init (TUI branch moved before init so alt-screen stays silent); budgets recorded — search repo 145ms/aur 507ms/flatpak 3490ms cold (long pole), updates repo 326ms/aur 627ms/flatpak 1380ms, stats local 1398ms — 135 tests
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)

@@ -73,6 +73,47 @@ async fn main() -> anyhow::Result<()> {
     if !cli.no_color && cfg.theme.no_color {
         cli.no_color = true;
     }
+    // Determine TUI mode before logging init: the TUI owns the terminal and
+    // must stay log-silent (stderr writes would scribble over alt-screen).
+    // --tui forces TUI, --no-tui forces plain, --json forces plain, otherwise auto.
+    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
+    let should_tui = if cli.no_tui || cli.json {
+        false
+    } else if cli.tui {
+        true
+    } else if cli.query.is_none() {
+        // No query and TTY -> TUI (your drawing: term window with search bar)
+        is_tty
+    } else {
+        false
+    };
+    if should_tui {
+        if !is_tty {
+            eprintln!("Error: --tui requires a terminal (TTY).");
+            eprintln!("Try: pacseek <query> --no-tui   or   pacseek --help");
+            eprintln!("Tip: In headless/CI, use --json or --no-tui");
+            std::process::exit(1);
+        }
+        let initial = cli.query.clone().unwrap_or_default();
+        // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
+        return pacseek::tui::run_with_config(initial, &cli, &cfg)
+            .map_err(|e| anyhow::anyhow!("{e}"));
+    }
+    // Tracing init: all remaining paths are one-shot CLI. Logs go to stderr:
+    // stdout is the data pipe (--json must stay pure).
+    let filter = match cli.verbose {
+        0 => EnvFilter::new("warn"),
+        1 => EnvFilter::new("info"),
+        2 => EnvFilter::new("debug"),
+        _ => EnvFilter::new("trace"),
+    };
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .without_time()
+        .with_writer(std::io::stderr)
+        .init();
+
     let readonly = cli.readonly || cfg.is_readonly();
 
     // 0.5.0 read-only fast paths: --updates/--orphans/--stats are safe, always allowed.
@@ -80,7 +121,12 @@ async fn main() -> anyhow::Result<()> {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let repo = pacseek::updates::check_repo_updates().unwrap_or_default();
+        let repo = {
+            let timer = pacseek::timing::start("repo-updates");
+            let out = pacseek::updates::check_repo_updates().unwrap_or_default();
+            timer.finish(out.len());
+            out
+        };
         // AUR check needs async client; reuse timeout from config.
         let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
         let client = reqwest::Client::builder()
@@ -89,15 +135,19 @@ async fn main() -> anyhow::Result<()> {
             .build();
         let mut all = repo;
         if let Ok(client) = client {
+            let timer = pacseek::timing::start("aur-updates");
             let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+            timer.finish(aur.len());
             all.extend(aur);
         }
         // Flatpak updates via remote-info (fail-open empty when disabled/offline).
         let cfg_fp = cfg.clone();
+        let timer = pacseek::timing::start("flatpak-updates");
         let flatpak =
             task::spawn_blocking(move || pacseek::sources::check_flatpak_updates_cached(&cfg_fp))
                 .await
                 .unwrap_or_default();
+        timer.finish(flatpak.len());
         all.extend(flatpak);
         all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         pacseek::output::print_updates(&all, cli.json, cli.no_color)?;
@@ -117,7 +167,12 @@ async fn main() -> anyhow::Result<()> {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let mut stats = pacseek::stats::gather_local_stats();
+        let mut stats = {
+            let timer = pacseek::timing::start("local-stats");
+            let out = pacseek::stats::gather_local_stats();
+            timer.finish(out.explicit.saturating_add(out.dependencies));
+            out
+        };
         // Best-effort AUR update count (offline -> 0, never fatal).
         let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
         if let Ok(client) = reqwest::Client::builder()
@@ -125,20 +180,27 @@ async fn main() -> anyhow::Result<()> {
             .timeout(timeout)
             .build()
         {
+            let timer = pacseek::timing::start("aur-updates");
             let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+            timer.finish(aur.len());
             stats.updates_aur = aur.len();
         }
         // Best-effort flatpak inventory + updates (absent/disabled -> 0).
         if cfg.flatpak_enabled() {
+            let timer = pacseek::timing::start("flatpak-list");
             if let Ok(list) = task::spawn_blocking(pacseek::sources::list_installed).await {
-                stats.flatpak_installed = list.unwrap_or_default().len();
+                let list = list.unwrap_or_default();
+                timer.finish(list.len());
+                stats.flatpak_installed = list.len();
             }
             let cfg_fp2 = cfg.clone();
+            let timer = pacseek::timing::start("flatpak-updates");
             if let Ok(up) = task::spawn_blocking(move || {
                 pacseek::sources::check_flatpak_updates_cached(&cfg_fp2)
             })
             .await
             {
+                timer.finish(up.len());
                 stats.updates_flatpak = up.len();
             }
         }
@@ -431,34 +493,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Determine TUI mode per tui-design lifecycle + cli-basics
-    // --tui forces TUI, --no-tui forces plain, --json forces plain, otherwise auto
-    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
-    let should_tui = if cli.no_tui || cli.json {
-        false
-    } else if cli.tui {
-        true
-    } else if cli.query.is_none() {
-        // No query and TTY -> TUI (your drawing: term window with search bar)
-        is_tty
-    } else {
-        false
-    };
-
-    if should_tui {
-        if !is_tty {
-            eprintln!("Error: --tui requires a terminal (TTY).");
-            eprintln!("Try: pacseek <query> --no-tui   or   pacseek --help");
-            eprintln!("Tip: In headless/CI, use --json or --no-tui");
-            std::process::exit(1);
-        }
-        let initial = cli.query.clone().unwrap_or_default();
-        // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
-        return pacseek::tui::run_with_config(initial, &cli, &cfg)
-            .map_err(|e| anyhow::anyhow!("{e}"));
-    }
-
-    // --- CLI one-shot mode (existing) ---
+    // --- CLI one-shot mode (existing): TUI already returned above. ---
     // Need query now
     let query = match cli.query {
         Some(q) if !q.trim().is_empty() => q,
@@ -468,19 +503,6 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
-
-    // Tracing init (only for CLI, not TUI which logs to file per skill)
-    let filter = match cli.verbose {
-        0 => EnvFilter::new("warn"),
-        1 => EnvFilter::new("info"),
-        2 => EnvFilter::new("debug"),
-        _ => EnvFilter::new("trace"),
-    };
-    fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .without_time()
-        .init();
 
     if cli.no_color || std::env::var("NO_COLOR").is_ok() {
         colored::control::set_override(false);
@@ -515,6 +537,8 @@ async fn main() -> anyhow::Result<()> {
         if !repo_enabled {
             Vec::new()
         } else {
+            // P1 perf: time the backend (warns over budget at default verbosity).
+            let timer = pacseek::timing::start("repo-search");
             let res = task::spawn_blocking(move || {
                 match search_repo(&query_repo, limit_repo, regex_repo, installed_only) {
                     Ok(v) => v,
@@ -531,13 +555,15 @@ async fn main() -> anyhow::Result<()> {
                 }
             })
             .await;
-            match res {
+            let out = match res {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::error!(err=?e, "spawn_blocking JoinError (repo search panicked)");
                     vec![]
                 }
-            }
+            };
+            timer.finish(out.len());
+            out
         }
     };
 
@@ -551,8 +577,11 @@ async fn main() -> anyhow::Result<()> {
         if !aur_enabled {
             Vec::new()
         } else {
-            match search_aur_with_config(&client, &query_aur, &by_str, limit_aur, regex_aur, &cfg)
-                .await
+            let timer = pacseek::timing::start("aur-search");
+            let out = match search_aur_with_config(
+                &client, &query_aur, &by_str, limit_aur, regex_aur, &cfg,
+            )
+            .await
             {
                 Ok(v) => v,
                 Err(e) => {
@@ -564,7 +593,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Vec::new()
                 }
-            }
+            };
+            timer.finish(out.len());
+            out
         }
     };
 
@@ -572,6 +603,7 @@ async fn main() -> anyhow::Result<()> {
         if !flatpak_enabled {
             Vec::new()
         } else {
+            let timer = pacseek::timing::start("flatpak-search");
             let q = query_flatpak.clone();
             let res = task::spawn_blocking(move || {
                 search_flatpak_with_config(&q, limit_flatpak, regex_flatpak, &cfg_flatpak)
@@ -581,13 +613,15 @@ async fn main() -> anyhow::Result<()> {
                     })
             })
             .await;
-            match res {
+            let out = match res {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::error!(err=?e, "spawn_blocking JoinError (flatpak search panicked)");
                     vec![]
                 }
-            }
+            };
+            timer.finish(out.len());
+            out
         }
     };
 
@@ -615,8 +649,15 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let total_timer = pacseek::timing::start("search-total");
     let (repo_packages, aur_packages, flatpak_packages) =
         tokio::join!(repo_future, aur_future, flatpak_future);
+    total_timer.finish(
+        repo_packages
+            .len()
+            .saturating_add(aur_packages.len())
+            .saturating_add(flatpak_packages.len()),
+    );
 
     if let Some(pb) = spinner {
         pb.finish_and_clear();
