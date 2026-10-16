@@ -79,6 +79,29 @@ pub enum Popup {
     Message(String),
 }
 
+/// Which backend a staged result block came from (P4 perf: each search leg
+/// paints as soon as its join completes instead of holding the UI for the
+/// slowest backend). `Done` finalizes: loading off, cache fill, final status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchStage {
+    Repo,
+    Aur,
+    Flatpak,
+    Done,
+}
+
+/// One search-result message. Staged legs carry their block (`Repo`/`Aur`/
+/// `Flatpak`, in fixed platform order matching the old combined list); the
+/// search orchestrator finishes with an empty-payload `Done`. The installed/
+/// updates workers keep their single-message flow and send their whole list
+/// inside `Done` — semantics unchanged there.
+struct SearchMsg {
+    search_id: u64,
+    stage: SearchStage,
+    query: String,
+    packages: Vec<Package>,
+}
+
 pub struct App {
     pub input: Input,
     pub packages: Vec<Package>,
@@ -117,13 +140,18 @@ pub struct App {
     /// Cached border type — parsed once from config instead of per-widget per-frame.
     pub border_type: BorderType,
     // Phase B: non-blocking search channel + dedup id per ratatui async skill
-    search_rx: Option<std::sync::mpsc::Receiver<(u64, Vec<Package>, String)>>,
+    search_rx: Option<std::sync::mpsc::Receiver<SearchMsg>>,
     search_id: u64,
     next_search_id: u64,
     /// Generation guard shared with worker threads: a trigger stores its id
     /// here; workers skip `tx.send` when a newer search superseded them, so
     /// stale threads never wake the UI with dead results.
     active_search: Arc<std::sync::atomic::AtomicU64>,
+    /// P4 staged search: per-search accumulation buffer. First stage arrival
+    /// for a generation replaces it (superseded leftovers never mix), later
+    /// legs append in platform order; `Done` swaps it into `packages` at once.
+    staged_packages: Vec<Package>,
+    staged_search_id: Option<u64>,
     /// Small FIFO result cache (std-only) — retyping / tab-switching a recent
     /// query serves instantly with zero disk/network. Cleared on install/remove.
     search_cache: HashMap<String, Vec<Package>>,
@@ -193,6 +221,8 @@ impl App {
             search_id: 0,
             next_search_id: 0,
             active_search: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            staged_packages: Vec::new(),
+            staged_search_id: None,
             search_cache: HashMap::new(),
             search_cache_order: VecDeque::new(),
             dirty: true,
@@ -264,6 +294,8 @@ impl App {
     fn clear_cache(&mut self) {
         self.search_cache.clear();
         self.search_cache_order.clear();
+        self.staged_packages.clear();
+        self.staged_search_id = None;
     }
 
     /// Apply freshly fetched results: selection, status text, per-mode memory.
@@ -355,6 +387,8 @@ impl App {
             Mode::Updates => self.last_query_updates.clone(),
         };
         self.packages.clear();
+        self.staged_packages.clear();
+        self.staged_search_id = None;
         self.list_state.select(None);
         self.popup = Popup::None;
         self.search_rx = None;
@@ -476,7 +510,7 @@ impl App {
     fn poll_search_results(&mut self) {
         // Drain pending results first so method calls below don't fight the
         // channel borrow (only the latest search_id is accepted).
-        let pending: Vec<(u64, Vec<Package>, String)> = match &self.search_rx {
+        let pending: Vec<SearchMsg> = match &self.search_rx {
             Some(rx) => {
                 let mut v = Vec::new();
                 while let Ok(msg) = rx.try_recv() {
@@ -486,20 +520,48 @@ impl App {
             }
             None => return,
         };
-        for (id, pkgs, query) in pending {
-            // Only accept latest search_id; discard stale
-            if id == self.search_id {
-                let key = self.cache_key(&query);
-                self.apply_results(pkgs.clone(), query);
-                self.cache_put(key, pkgs);
-            } else {
-                // Stale result, ignore but keep is_loading if newer still pending
-                // If this stale was the last expected, don't clear loading
+        for msg in pending {
+            // Only accept latest search_id; discard stale generations whole.
+            if msg.search_id != self.search_id {
                 tracing::debug!(
-                    id,
+                    id = msg.search_id,
                     search_id = self.search_id,
                     "discard stale search result"
                 );
+                continue;
+            }
+            let key = self.cache_key(&msg.query);
+            match msg.stage {
+                SearchStage::Done => {
+                    // Search orchestrator finishes with an empty payload (the
+                    // legs were staged into `staged_packages`); installed/
+                    // updates workers carry their whole list in `Done`.
+                    let pkgs = if msg.packages.is_empty() {
+                        std::mem::take(&mut self.staged_packages)
+                    } else {
+                        msg.packages
+                    };
+                    self.apply_results(pkgs.clone(), msg.query);
+                    self.cache_put(key, pkgs);
+                }
+                SearchStage::Repo | SearchStage::Aur | SearchStage::Flatpak => {
+                    // Staged leg: leave the visible list (and cursor) showing
+                    // the last complete generation while the new generation
+                    // accumulates — first arrival replaces the scratch buffer,
+                    // later legs append. Count tick in the interim status.
+                    if self.staged_search_id == Some(msg.search_id) {
+                        self.staged_packages.extend(msg.packages);
+                    } else {
+                        self.staged_packages = msg.packages;
+                        self.staged_search_id = Some(msg.search_id);
+                    }
+                    self.status = format!(
+                        "Searching for '{}' — {} found so far...",
+                        msg.query,
+                        self.staged_packages.len()
+                    );
+                    self.dirty = true;
+                }
             }
         }
     }
@@ -960,7 +1022,12 @@ impl App {
                 if active.load(Ordering::Relaxed) != search_id {
                     return;
                 }
-                let _ = tx.send((search_id, pkgs, query_clone));
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Done,
+                    query: query_clone,
+                    packages: pkgs,
+                });
             });
             return;
         }
@@ -1024,7 +1091,12 @@ impl App {
                 if active.load(Ordering::Relaxed) != search_id {
                     return;
                 }
-                let _ = tx.send((search_id, res, query_clone));
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Done,
+                    query: query_clone,
+                    packages: res,
+                });
             });
             return;
         }
@@ -1161,26 +1233,52 @@ impl App {
                     }
                 })
                 .unwrap_or_default();
-            total_timer.finish(
-                repo_res
-                    .len()
-                    .saturating_add(aur_res.len())
-                    .saturating_add(flatpak_res.len()),
-            );
+            // Respect source order: repo, aur, flatpak (bottom_up handled in
+            // UI) — the stages below arrive and accumulate in exactly this
+            // order because the joins are sequential.
+            let total_results = repo_res
+                .len()
+                .saturating_add(aur_res.len())
+                .saturating_add(flatpak_res.len());
 
-            let mut combined =
-                Vec::with_capacity(repo_res.len() + aur_res.len() + flatpak_res.len());
-            // Respect source order: repo, aur, flatpak (bottom_up handled in UI).
-            combined.extend(repo_res);
-            combined.extend(aur_res);
-            combined.extend(flatpak_res);
-
-            // Superseded while workers ran: drop instead of waking the UI.
-            if active.load(Ordering::Relaxed) != search_id {
-                return;
+            // P4 staged: paint each leg the moment it joins — the repo block
+            // (~150ms) no longer waits for AUR. Stage sends validate the
+            // generation too, so a superseded search drops out incrementally.
+            if active.load(Ordering::Relaxed) == search_id {
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Repo,
+                    query: query_clone.clone(),
+                    packages: repo_res,
+                });
             }
+            if active.load(Ordering::Relaxed) == search_id {
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Aur,
+                    query: query_clone.clone(),
+                    packages: aur_res,
+                });
+            }
+            if active.load(Ordering::Relaxed) == search_id {
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Flatpak,
+                    query: query_clone.clone(),
+                    packages: flatpak_res,
+                });
+            }
+            total_timer.finish(total_results);
 
-            let _ = tx.send((search_id, combined, query_clone));
+            // Final marker: loading off + cache + final status atomically.
+            if active.load(Ordering::Relaxed) == search_id {
+                let _ = tx.send(SearchMsg {
+                    search_id,
+                    stage: SearchStage::Done,
+                    query: query_clone,
+                    packages: Vec::new(),
+                });
+            }
         });
     }
 
@@ -1520,6 +1618,184 @@ mod tests {
         app.trigger_search();
         assert!(!app.is_loading);
         assert!(app.packages.is_empty());
+    }
+
+    // -------------------------------------------------------------------
+    // P4 staged results: per-leg paints, atomic finalization.
+    // -------------------------------------------------------------------
+
+    /// Feed messages to the app exactly as the poll loop would see them.
+    fn feed_messages(app: &mut App, msgs: Vec<SearchMsg>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for m in msgs {
+            let _ = tx.send(m);
+        }
+        app.search_rx = Some(rx);
+        app.poll_search_results();
+        drop(tx);
+    }
+
+    fn pkg(repo: &str, name: &str) -> Package {
+        Package::minimal(name.to_string(), "1.0".to_string(), repo.to_string())
+    }
+
+    #[test]
+    fn staged_results_accumulate_then_swap_atomically() {
+        let mut app = App::new("".into());
+        app.search_id = 7;
+        app.packages = vec![pkg("repo", "old-row")]; // last complete generation
+        app.is_loading = true;
+
+        feed_messages(
+            &mut app,
+            vec![SearchMsg {
+                search_id: 7,
+                stage: SearchStage::Repo,
+                query: "ff".into(),
+                packages: vec![pkg("repo", "r1"), pkg("repo", "r2")],
+            }],
+        );
+        // Old generation stays visible; scratch accumulates; still loading.
+        assert_eq!(app.packages.len(), 1, "old rows must stay until Done");
+        assert_eq!(app.staged_packages.len(), 2);
+        assert!(app.is_loading);
+        assert!(app.status.contains("2 found so far"), "{}", app.status);
+
+        feed_messages(
+            &mut app,
+            vec![
+                SearchMsg {
+                    search_id: 7,
+                    stage: SearchStage::Aur,
+                    query: "ff".into(),
+                    packages: vec![pkg("aur", "a1"), pkg("aur", "a2")],
+                },
+                SearchMsg {
+                    search_id: 7,
+                    stage: SearchStage::Flatpak,
+                    query: "ff".into(),
+                    packages: vec![pkg("flatpak", "f1"), pkg("flatpak", "f2")],
+                },
+            ],
+        );
+        assert_eq!(app.packages.len(), 1, "still the old generation");
+        assert_eq!(app.staged_packages.len(), 6);
+        assert_eq!(
+            app.staged_packages[0].repo, "repo",
+            "pinned platform order repo→aur→flatpak"
+        );
+        assert_eq!(app.staged_packages[2].repo, "aur");
+
+        feed_messages(
+            &mut app,
+            vec![SearchMsg {
+                search_id: 7,
+                stage: SearchStage::Done,
+                query: "ff".into(),
+                packages: vec![],
+            }],
+        );
+        assert!(!app.is_loading);
+        assert_eq!(app.packages.len(), 6);
+        assert_eq!(app.packages[0].name, "r1");
+        assert_eq!(app.packages[2].name, "a1");
+        assert_eq!(app.packages[4].name, "f1");
+        assert_eq!(app.status, "Found 6 (repo 2 aur 2 flatpak 2)");
+        assert_eq!(app.list_state.selected(), Some(0));
+        // Final generation is cached like the old combined send was.
+        assert_eq!(
+            app.cache_get(&app.cache_key("ff"))
+                .unwrap_or_default()
+                .len(),
+            6
+        );
+        assert!(app.staged_packages.is_empty(), "scratch drained at Done");
+    }
+
+    #[test]
+    fn staged_superseded_generation_is_discarded() {
+        let mut app = App::new("".into());
+        app.search_id = 9; // newer generation alive; ids 7 are stale
+        let before_len = app.packages.len();
+        let before_status = app.status.clone();
+
+        feed_messages(
+            &mut app,
+            vec![
+                SearchMsg {
+                    search_id: 7,
+                    stage: SearchStage::Repo,
+                    query: "old".into(),
+                    packages: vec![pkg("repo", "stale")],
+                },
+                SearchMsg {
+                    search_id: 7,
+                    stage: SearchStage::Done,
+                    query: "old".into(),
+                    packages: vec![],
+                },
+            ],
+        );
+        assert!(app.staged_packages.is_empty(), "stale stages never mix");
+        assert_eq!(app.packages.len(), before_len);
+        assert_eq!(app.status, before_status);
+    }
+
+    #[test]
+    fn done_with_carry_payload_wins_over_scratch() {
+        // Installed/updates workers keep the single-message flow: their Done
+        // carries the whole list and must not depend on staged scratch.
+        let mut app = App::new("".into());
+        app.search_id = 3;
+        app.packages = vec![pkg("repo", "stale-rows"), pkg("repo", "more-rows")];
+        feed_messages(
+            &mut app,
+            vec![SearchMsg {
+                search_id: 3,
+                stage: SearchStage::Done,
+                query: "inst".into(),
+                packages: vec![pkg("local", "installed-1")],
+            }],
+        );
+        assert!(!app.is_loading);
+        assert_eq!(app.packages.len(), 1);
+        assert_eq!(app.packages[0].name, "installed-1");
+    }
+
+    #[test]
+    fn first_stage_replaces_scratch_from_superseded_searches() {
+        // A superseded search left scratch behind before Done ever fired; the
+        // next generation's first arrival must replace, not append to it.
+        let mut app = App::new("".into());
+        app.search_id = 4;
+        app.staged_packages = vec![pkg("repo", "ghost")];
+        app.staged_search_id = Some(2);
+        feed_messages(
+            &mut app,
+            vec![
+                SearchMsg {
+                    search_id: 4,
+                    stage: SearchStage::Repo,
+                    query: "q".into(),
+                    packages: vec![], // repo leg disabled/empty
+                },
+                SearchMsg {
+                    search_id: 4,
+                    stage: SearchStage::Aur,
+                    query: "q".into(),
+                    packages: vec![pkg("aur", "fresh")],
+                },
+                SearchMsg {
+                    search_id: 4,
+                    stage: SearchStage::Done,
+                    query: "q".into(),
+                    packages: vec![],
+                },
+            ],
+        );
+        assert_eq!(app.packages.len(), 1, "ghost must not survive");
+        assert_eq!(app.packages[0].name, "fresh");
+        assert_eq!(app.status, "Found 1 (repo 0 aur 1 flatpak 0)");
     }
 
     #[test]
