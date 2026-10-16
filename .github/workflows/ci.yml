@@ -72,10 +72,31 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      - name: Unit tests (offline)
+      - name: Unit tests (lib, offline)
         env:
           PACSEEK_SKIP_LIVE: "1"
-        run: cargo test --locked --lib --test aur_nan --test tui_snapshot
+        run: cargo test --locked --lib 2>&1 | tee /tmp/unit-lib.log
+
+      - name: Unit tests (snapshot, offline)
+        env:
+          PACSEEK_SKIP_LIVE: "1"
+        run: cargo test --locked --test aur_nan --test tui_snapshot 2>&1 | tee /tmp/unit-snap.log
+
+      - name: Report failing tests
+        if: always()
+        run: |
+          for f in /tmp/unit-lib.log /tmp/unit-snap.log; do
+            [ -f "$f" ] || continue
+            fails=$(grep -E '^test .+ FAILED$' "$f" || true)
+            if [ -n "$fails" ]; then
+              echo "$fails" | head -n 20 | sed 's/^/::error::FAILED: /'
+            fi
+            panics=$(grep -m5 'panicked at' "$f" || true)
+            if [ -n "$panics" ]; then
+              echo "$panics" | sed 's/^/::error::/'
+            fi
+          done
+          exit 0
 
       - name: Sync pacman DB + integration tests
         run: |
