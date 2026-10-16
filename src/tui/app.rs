@@ -877,6 +877,13 @@ impl App {
                 // Perf P3: repo/AUR/flatpak checks run on parallel threads
                 // (mirror of the search fan-out); joins carry panic guards.
                 // Timings live inside each thread for true per-backend latency.
+                // One-shot RPC warm on its own thread (blocking HEAD never
+                // serializes this orchestrator); the AUR info probe then rides
+                // a warm pool.
+                {
+                    let cfg_w = cfg.clone();
+                    std::thread::spawn(move || crate::search::aur::warm_blocking_aur(&cfg_w));
+                }
                 let repo_h = std::thread::spawn(|| {
                     let timer = crate::timing::start("tui-repo-updates");
                     let out = crate::updates::check_repo_updates().unwrap_or_default();
@@ -1064,6 +1071,13 @@ impl App {
 
         thread::spawn(move || {
             let aur_by_str = aur_by.as_str().to_string();
+            // One-shot RPC warm (P3) on its own thread — a HEAD when nothing
+            // else can serve it, overlapping the repo leg of this same query;
+            // later queries reuse the pooled connection for instant AUR latency.
+            {
+                let cfg_w = cfg.clone();
+                std::thread::spawn(move || crate::search::aur::warm_blocking_aur(&cfg_w));
+            }
             // Spawn repo, aur, flatpak in parallel, respecting source filter.
             // Flatpak is fail-open empty when disabled/binary missing (P2).
             let flatpak_on = matches!(source, Source::Flatpak | Source::All)

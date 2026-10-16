@@ -131,12 +131,16 @@ async fn main() -> anyhow::Result<()> {
             timer.finish(out.len());
             out
         };
-        // AUR check needs async client; reuse timeout from config.
-        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
-        let client = reqwest::Client::builder()
-            .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(timeout)
-            .build();
+        // AUR check needs async client; reuse timeout from config. P3: tuned
+        // builder + warm-up overlapping the repo probe below.
+        let client = pakmap::search::aur::client_builder(cfg.search.timeout_secs).build();
+        if let Ok(ref client) = client {
+            let warm_client = client.clone();
+            let warm_rpc = cfg.aur_rpc_url();
+            tokio::spawn(async move {
+                pakmap::search::aur::warm_async(&warm_client, &warm_rpc).await;
+            });
+        }
         let mut all = Vec::new();
         if let Ok(client) = client {
             let aur_fut = async {
@@ -185,11 +189,14 @@ async fn main() -> anyhow::Result<()> {
         }
         // Perf P3: all four probes run concurrently; the flatpak branch lists
         // once and reuses the list for the updates check (single scan).
-        let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
-        let client = reqwest::Client::builder()
-            .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(timeout)
-            .build();
+        let client = pakmap::search::aur::client_builder(cfg.search.timeout_secs).build();
+        if let Ok(ref client) = client {
+            let warm_client = client.clone();
+            let warm_rpc = cfg.aur_rpc_url();
+            tokio::spawn(async move {
+                pakmap::search::aur::warm_async(&warm_client, &warm_rpc).await;
+            });
+        }
         let local_fut = async {
             let timer = pakmap::timing::start("local-stats");
             let out = match task::spawn_blocking(pakmap::stats::gather_local_stats).await {
@@ -550,11 +557,20 @@ async fn main() -> anyhow::Result<()> {
         colored::control::set_override(false);
     }
 
-    let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
-    let client = reqwest::Client::builder()
-        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(timeout)
-        .build()?;
+    // P3 perf: tuned client (gzip/connect-bound/nodelay) built once for the
+    // whole fan-out.
+    let client = pakmap::search::aur::client_builder(cfg.search.timeout_secs).build()?;
+
+    // P3 perf: warm the RPC pool while the repo probe runs — the handshake
+    // overlaps the repo/flatpak legs, so the AUR request rides an established
+    // connection (one-shot per process; skipped under PAKMAP_SKIP_LIVE).
+    {
+        let warm_client = client.clone();
+        let warm_rpc = cfg.aur_rpc_url();
+        tokio::spawn(async move {
+            pakmap::search::aur::warm_async(&warm_client, &warm_rpc).await;
+        });
+    }
 
     let query_repo = query.clone();
     let query_aur = query.clone();

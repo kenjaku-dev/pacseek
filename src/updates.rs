@@ -246,11 +246,7 @@ fn check_aur_updates_blocking_live(cfg: &crate::config::Config) -> Vec<PkgUpdate
     if foreign.is_empty() {
         return vec![];
     }
-    let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(timeout)
-        .build();
+    let client = crate::search::aur::blocking_client_builder(cfg.search.timeout_secs).build();
     let Ok(client) = client else {
         return vec![];
     };

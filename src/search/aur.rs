@@ -15,6 +15,114 @@ fn aur_rpc_with_config(cfg: &Config) -> String {
     cfg.aur_rpc_url()
 }
 
+// ---------------------------------------------------------------------------
+// P3 perf: shared HTTP tuning + connection warm-up.
+//
+// All AUR-speaking HTTP clients share one tuning profile so knobs never
+// drift: gzip response decoding (Cargo feature), a bounded *connect* phase
+// (a dead network fails in seconds instead of burning the whole budget
+// while the TUI spins), explicit `tcp_nodelay` (no small-write Nagle
+// stalls), and the UA. The overall timeout still comes from the caller's
+// config. Plus a one-shot per-process connection warm-up: a cheap HEAD at
+// the RPC origin, so the TCP+TLS handshake is already in the pool when the
+// first real request runs (TUI idle time; CLI overlaps it with the repo
+// fan-out). HEAD is the cheapest warm — no body, ~200ms handshake total.
+// ---------------------------------------------------------------------------
+
+/// Bound on the *connect* phase only (dns+tcp+tls); the request timeout
+/// keeps using the caller's `search.timeout_secs`.
+pub const AUR_CONNECT_TIMEOUT_SECS: u64 = 5;
+
+/// Tuned async client builder (CLI fan-outs: search/updates/stats).
+pub fn client_builder(secs: u64) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(secs.max(1)))
+        .connect_timeout(Duration::from_secs(AUR_CONNECT_TIMEOUT_SECS))
+        .tcp_nodelay(true)
+}
+
+/// Tuned blocking client builder (TUI worker pools).
+pub fn blocking_client_builder(secs: u64) -> reqwest::blocking::ClientBuilder {
+    reqwest::blocking::Client::builder()
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(secs.max(1)))
+        .connect_timeout(Duration::from_secs(AUR_CONNECT_TIMEOUT_SECS))
+        .tcp_nodelay(true)
+}
+
+/// One-shot-per-process guard shared by the async and blocking warm-ups
+/// (`true` = already attempted); the pooled connection lives on either way.
+static AUR_WARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// RPC origin from a configured RPC URL — `https://aur.archlinux.org/rpc/v5`
+/// becomes `https://aur.archlinux.org/`. Pure; None for unparsable or
+/// non-http(s) URLs (warm-up silently skipped, never fatal).
+pub fn aur_warm_origin(rpc_url: &str) -> Option<String> {
+    let parsed = url::Url::parse(rpc_url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed.host_str()?.trim();
+    if host.is_empty() {
+        return None;
+    }
+    let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Some(format!("{}://{}{}/", parsed.scheme(), host, port))
+}
+
+/// Blocking warm-up (TUI workers): one HEAD per process, fire-and-forget.
+/// Never panics, never blocks the caller beyond one `send()` — call it from
+/// a spawned thread.
+pub fn warm_blocking_aur(cfg: &Config) {
+    warm_blocking_aur_url(&cfg.aur_rpc_url(), cfg.search.timeout_secs.max(1));
+}
+
+fn warm_blocking_aur_url(rpc_url: &str, timeout_secs: u64) {
+    if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
+        return;
+    }
+    // Already attempted (or racing): the pool is warm-or-in-flight either way.
+    if AUR_WARMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(origin) = aur_warm_origin(rpc_url) else {
+        return;
+    };
+    let Ok(client) = blocking_client_for_timeout(timeout_secs) else {
+        return;
+    };
+    let timer = crate::timing::start("aur-warm");
+    let outcome = client.head(&origin).send();
+    timer.finish(usize::from(outcome.is_ok()));
+    match outcome {
+        Ok(_) => tracing::debug!(%origin, "aur connection warmed"),
+        Err(e) => tracing::debug!(err=?e, %origin, "aur warmup failed (non-fatal)"),
+    }
+}
+
+/// Async warm-up (CLI fan-outs): same one-shot semantics; call detached via
+/// `tokio::spawn` with the *same* client the search uses, so the handshake
+/// lands in the shared connection pool.
+pub async fn warm_async(client: &reqwest::Client, rpc_url: &str) {
+    if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
+        return;
+    }
+    if AUR_WARMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(origin) = aur_warm_origin(rpc_url) else {
+        return;
+    };
+    let timer = crate::timing::start("aur-warm");
+    let outcome = client.head(&origin).send().await;
+    timer.finish(usize::from(outcome.is_ok()));
+    match outcome {
+        Ok(_) => tracing::debug!(%origin, "aur connection warmed"),
+        Err(e) => tracing::debug!(err=?e, %origin, "aur warmup failed (non-fatal)"),
+    }
+}
+
 /// Per-timeout client cache — building a blocking Client does TLS init, so
 /// reuse one per timeout value instead of constructing per search.
 /// Returns `Result` (no `expect`): a TLS/client build failure must degrade to
@@ -29,9 +137,7 @@ fn blocking_client_for_timeout(secs: u64) -> anyhow::Result<reqwest::blocking::C
     {
         return Ok(c.clone());
     }
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(secs))
+    let client = blocking_client_builder(secs)
         .build()
         .context("failed to build blocking reqwest client")?;
     if let Ok(mut guard) = cache.lock() {
@@ -290,6 +396,38 @@ mod tests {
         assert!(blocking_client_for_timeout(timeout).is_ok());
         // Second call serves the per-timeout cache.
         assert!(blocking_client_for_timeout(timeout).is_ok());
+    }
+
+    #[test]
+    fn tuned_client_builders_build_offline() {
+        // Building does TLS init but no network — must be Ok both sides with
+        // the shared tuning (gzip feature, connect bound, nodelay).
+        assert!(client_builder(15).build().is_ok());
+        assert!(blocking_client_builder(15).build().is_ok());
+        // Degenerate timeouts still bound to >= 1s inside the builders.
+        assert!(client_builder(0).build().is_ok());
+        assert!(blocking_client_builder(0).build().is_ok());
+    }
+
+    #[test]
+    fn warm_origin_derived_from_rpc_url() {
+        assert_eq!(
+            aur_warm_origin("https://aur.archlinux.org/rpc/v5").as_deref(),
+            Some("https://aur.archlinux.org/")
+        );
+        // Custom origin keeps scheme+port (local mirror cases).
+        assert_eq!(
+            aur_warm_origin("http://127.0.0.1:9090/rpc/v5").as_deref(),
+            Some("http://127.0.0.1:9090/")
+        );
+        assert_eq!(
+            aur_warm_origin("https://aur.debian.mirror.example/rpc/v5/").as_deref(),
+            Some("https://aur.debian.mirror.example/")
+        );
+        // Unparsable / non-http / empty-host: no warm, never a panic.
+        assert!(aur_warm_origin("not a url").is_none());
+        assert!(aur_warm_origin("ftp://example.org/rpc/v5").is_none());
+        assert!(aur_warm_origin("https://").is_none());
     }
 
     #[test]
