@@ -9,9 +9,9 @@
 
 ## 1. One-liner build & install
 ```bash
-cd /home/achraf/projects/pacseek
+cd /home/achraf/projects/pakmap
 make install        # or: cargo install --path . --force
-pacseek --help
+pakmap --help
 ```
 
 ## 2. Sync pacman DB first (required for repo results)
@@ -21,31 +21,31 @@ sudo pacman -Sy
 
 ## 3. Try it
 ```bash
-pacseek firefox --limit 5
-pacseek neovim --json | jq
-pacseek yay --source aur --by name
-pacseek "linux.*headers" --regex
-pacseek rust --installed-only
+pakmap firefox --limit 5
+pakmap neovim --json | jq
+pakmap yay --source aur --by name
+pakmap "linux.*headers" --regex
+pakmap rust --installed-only
 ```
 
 ## 4. Release binary
 ```bash
 make release
-ls -lh target/release/pacseek   # ~5.1M stripped
-sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek
+ls -lh target/release/pakmap   # ~5.1M stripped
+sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap
 ```
 
 ## Shell completions (optional butter)
 ```bash
 # bash
-pacseek --help | head   # helps discovery
+pakmap --help | head   # helps discovery
 # completions via clap_complete if you enable feature later:
-# cargo run -- --generate-completion bash > /usr/share/bash-completion/completions/pacseek
+# cargo run -- --generate-completion bash > /usr/share/bash-completion/completions/pakmap
 ```
 
 ## Update
 ```bash
-cd /home/achraf/projects/pacseek
+cd /home/achraf/projects/pakmap
 git pull
 cargo install --path . --force
 ```

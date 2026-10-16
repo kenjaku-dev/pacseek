@@ -2,5 +2,5 @@
 .DS_Store
 *.log
 # auto-sync local noise
-.pacseek-auto-sync*
+.pakmap-auto-sync*
 *.pid

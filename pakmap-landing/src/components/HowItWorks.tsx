@@ -5,7 +5,7 @@ const STEPS = [
   {
     step: "01",
     title: "Type a query",
-    body: "Open pacseek (TTY defaults to TUI) or run pacseek neovim --no-tui. Repo and AUR search run in parallel.",
+    body: "Open pakmap (TTY defaults to TUI) or run pakmap neovim --no-tui. Repo and AUR search run in parallel.",
     keys: ["/"],
   },
   {

@@ -1481,8 +1481,8 @@ mod tests {
     #[test]
     fn trigger_search_is_non_blocking() {
         // Spawns real repo/AUR workers: hermetic for assertions (no result
-        // dependency), but pass PACSEEK_SKIP_LIVE=1 for fully offline runs.
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        // dependency), but pass PAKMAP_SKIP_LIVE=1 for fully offline runs.
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let mut app = App::new("firefox".into());
@@ -1586,8 +1586,8 @@ mod tests {
     #[test]
     fn tab_switches_to_installed_mode() {
         // Installed mode triggers a real localdb scan thread; skip it when
-        // PACSEEK_SKIP_LIVE=1 is set for fully offline runs.
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        // PAKMAP_SKIP_LIVE=1 is set for fully offline runs.
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let mut app = App::new("".into());
@@ -1860,8 +1860,8 @@ mod tests {
     #[test]
     fn u_in_updates_opens_confirm_upgrade() {
         // `U` fetches Arch news live for the inline warning; skip the fetch
-        // when PACSEEK_SKIP_LIVE=1 (popup shape is snapshot-covered).
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        // when PAKMAP_SKIP_LIVE=1 (popup shape is snapshot-covered).
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let mut app = App::new("".into());
@@ -1941,7 +1941,7 @@ mod tests {
 
     #[test]
     fn o_in_installed_toggles_orphans_only() {
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let mut app = App::new("".into());
@@ -1990,7 +1990,7 @@ mod tests {
         app.switch_mode();
         assert_eq!(app.mode, Mode::Installed);
         // Updates fetch spawns workers; skip live part offline.
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         app.switch_mode();

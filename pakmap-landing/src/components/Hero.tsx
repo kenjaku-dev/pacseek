@@ -19,7 +19,7 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-const INSTALL_CMD = "cargo install --git https://github.com/kenjaku-dev/pacseek";
+const INSTALL_CMD = "cargo install --git https://github.com/kenjaku-dev/pakmap";
 
 const SHORTCUTS = [
   { keys: ["/"], label: "search" },
@@ -82,11 +82,11 @@ export function Hero() {
               href="#install"
               className="btn-primary-glow inline-flex cursor-pointer items-center gap-2 rounded-md bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent"
             >
-              Get pacseek
+              Get pakmap
               <ArrowDown aria-hidden="true" className="h-4 w-4" />
             </a>
             <a
-              href="https://github.com/kenjaku-dev/pacseek"
+              href="https://github.com/kenjaku-dev/pakmap"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card/60 px-4 py-2.5 text-sm text-muted-foreground backdrop-blur-sm transition-colors duration-200 hover:border-accent/50 hover:text-foreground"

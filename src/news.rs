@@ -24,8 +24,8 @@ const INTERVENTION_HINTS: &[&str] = &[
 fn cache_file(cfg: &crate::config::Config) -> Option<PathBuf> {
     let base = cfg
         .cache_dir_path()
-        .or_else(|| dirs::cache_dir().map(|p| p.join("pacseek")))
-        .unwrap_or_else(|| PathBuf::from("/tmp/pacseek"));
+        .or_else(|| dirs::cache_dir().map(|p| p.join("pakmap")))
+        .unwrap_or_else(|| PathBuf::from("/tmp/pakmap"));
     Some(base.join("arch-news.json"))
 }
 
@@ -87,7 +87,7 @@ pub fn fetch_arch_news(cfg: &crate::config::Config) -> Vec<NewsItem> {
 fn fetch_live(cfg: &crate::config::Config) -> Vec<NewsItem> {
     let timeout = Duration::from_secs(cfg.search.timeout_secs.clamp(3, 30).min(10));
     let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
         .timeout(timeout)
         .build();
     let Ok(client) = client else {

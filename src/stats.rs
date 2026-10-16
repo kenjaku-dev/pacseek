@@ -11,7 +11,7 @@ pub struct SysStats {
     pub updates_flatpak: usize,
     pub flatpak_installed: usize,
     pub cache_pacman_bytes: u64,
-    pub cache_pacseek_bytes: u64,
+    pub cache_pakmap_bytes: u64,
 }
 
 /// Local-only stats (no network): explicit/deps split + orphans + cache sizes.
@@ -37,7 +37,7 @@ pub fn gather_local_stats() -> SysStats {
         updates_flatpak: 0,
         flatpak_installed: 0,
         cache_pacman_bytes: dir_size("/var/cache/pacman/pkg"),
-        cache_pacseek_bytes: cache_size(),
+        cache_pakmap_bytes: cache_size(),
     }
 }
 
@@ -74,7 +74,7 @@ fn dir_size(path: &str) -> u64 {
 }
 
 /// Recursive cache size with a depth cap and no symlink following:
-/// pacman/pacseek caches can hold symlinks; following them risks cycles
+/// pacman/pakmap caches can hold symlinks; following them risks cycles
 /// and double counting. Errors (permissions, races) are skipped, never fatal.
 fn dir_size_recursive(path: &std::path::Path, depth: usize) -> u64 {
     if depth > 8 {
@@ -100,8 +100,8 @@ fn dir_size_recursive(path: &std::path::Path, depth: usize) -> u64 {
 fn cache_size() -> u64 {
     let base = dirs::cache_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join("pacseek");
-    dir_size(base.to_str().unwrap_or("/tmp/pacseek"))
+        .join("pakmap");
+    dir_size(base.to_str().unwrap_or("/tmp/pakmap"))
 }
 
 /// Human bytes: 1.2 MiB style, no float noise.

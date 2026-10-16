@@ -30,7 +30,7 @@ fn blocking_client_for_timeout(secs: u64) -> anyhow::Result<reqwest::blocking::C
         return Ok(c.clone());
     }
     let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(secs))
         .build()
         .context("failed to build blocking reqwest client")?;
@@ -165,7 +165,7 @@ pub async fn search_aur_with_config(
         .get(&url)
         .header(
             "User-Agent",
-            format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+            format!("pakmap/{}", env!("CARGO_PKG_VERSION")),
         )
         .send()
         .await
@@ -245,7 +245,7 @@ pub fn search_aur_blocking_with_config(
         .get(&url)
         .header(
             "User-Agent",
-            format!("pacseek/{}", env!("CARGO_PKG_VERSION")),
+            format!("pakmap/{}", env!("CARGO_PKG_VERSION")),
         )
         .send()
         .with_context(|| format!("AUR request failed {}", url))?;

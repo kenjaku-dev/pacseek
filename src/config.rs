@@ -296,17 +296,17 @@ impl Default for BehaviorConfig {
 // ---- path & load -----------------------------------------------------------
 
 impl Config {
-    /// XDG path: $XDG_CONFIG_HOME/pacseek/config.toml or ~/.config/pacseek/config.toml
+    /// XDG path: $XDG_CONFIG_HOME/pakmap/config.toml or ~/.config/pakmap/config.toml
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("pacseek").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("pakmap").join("config.toml"))
     }
 
-    /// Project-local override: ./pacseek.toml or ./pacseek/config.toml (cwd)
+    /// Project-local override: ./pakmap.toml or ./pakmap/config.toml (cwd)
     pub fn project_path() -> Option<PathBuf> {
         let cwd = std::env::current_dir().ok()?;
         [
-            cwd.join("pacseek.toml"),
-            cwd.join("pacseek").join("config.toml"),
+            cwd.join("pakmap.toml"),
+            cwd.join("pakmap").join("config.toml"),
         ]
         .into_iter()
         .find(|cand| cand.exists())
@@ -361,8 +361,8 @@ impl Config {
     }
 
     pub fn example_toml() -> String {
-        r#"# pacseek config — edit and save, changes apply on next launch
-# See: https://github.com/kenjaku-dev/pacseek  — all fields optional
+        r#"# pakmap config — edit and save, changes apply on next launch
+# See: https://github.com/kenjaku-dev/pakmap  — all fields optional
 
 [search]
 limit = 50                 # 0 = no limit
@@ -421,8 +421,8 @@ tab_normal = "dark_gray"
 bottom_up = false
 verbose = 0
 # aur_rpc = "https://aur.archlinux.org/rpc/v5"
-# cache_dir = "/tmp/pacseek"
-# PACSEEK_NOCONFIRM=1 in the environment also enables the two flags below
+# cache_dir = "/tmp/pakmap"
+# PAKMAP_NOCONFIRM=1 in the environment also enables the two flags below
 # (and skips --remove/--refresh confirmations) — handy for scripts.
 makepkg_noconfirm = false
 remove_flags = "Rs"        # R|Rs|Rns|Ru — sudo pacman -<flags>
@@ -637,19 +637,19 @@ impl Config {
         }
     }
     pub fn remove_noconfirm(&self) -> bool {
-        self.behavior.remove_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+        self.behavior.remove_noconfirm || std::env::var("PAKMAP_NOCONFIRM").is_ok()
     }
     pub fn refresh_noconfirm(&self) -> bool {
-        self.behavior.refresh_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+        self.behavior.refresh_noconfirm || std::env::var("PAKMAP_NOCONFIRM").is_ok()
     }
     pub fn upgrade_noconfirm(&self) -> bool {
-        self.behavior.upgrade_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+        self.behavior.upgrade_noconfirm || std::env::var("PAKMAP_NOCONFIRM").is_ok()
     }
     pub fn is_readonly(&self) -> bool {
         self.behavior.readonly
     }
     pub fn clean_noconfirm(&self) -> bool {
-        self.behavior.clean_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+        self.behavior.clean_noconfirm || std::env::var("PAKMAP_NOCONFIRM").is_ok()
     }
     /// Effective keep count: CLI --keep wins when non-default, else config.
     /// Clamped to >= 1 — keep 0 would nuke the whole cache.
@@ -683,7 +683,7 @@ impl Config {
     /// P3: `-y` for flatpak install/remove/clean (config or env, same as the
     /// pacman noconfirm flags).
     pub fn flatpak_noconfirm(&self) -> bool {
-        self.behavior.flatpak_noconfirm || std::env::var("PACSEEK_NOCONFIRM").is_ok()
+        self.behavior.flatpak_noconfirm || std::env::var("PAKMAP_NOCONFIRM").is_ok()
     }
 }
 

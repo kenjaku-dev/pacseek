@@ -5,12 +5,12 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use pacseek::cli::{Cli, Source};
-use pacseek::config::Config;
-use pacseek::confirm::{confirm_prompt, should_confirm};
-use pacseek::output::{print_json_error, print_packages};
-use pacseek::search::{search_aur_with_config, search_repo, search_repo_fallback};
-use pacseek::sources::search_flatpak_with_config;
+use pakmap::cli::{Cli, Source};
+use pakmap::config::Config;
+use pakmap::confirm::{confirm_prompt, should_confirm};
+use pakmap::output::{print_json_error, print_packages};
+use pakmap::search::{search_aur_with_config, search_repo, search_repo_fallback};
+use pakmap::sources::search_flatpak_with_config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -56,8 +56,8 @@ async fn main() -> anyhow::Result<()> {
     if cli.source == Source::All && cfg.effective_source() != Source::All {
         cli.source = cfg.effective_source();
     }
-    if cli.by == pacseek::cli::AurBy::NameDesc
-        && cfg.effective_aur_by() != pacseek::cli::AurBy::NameDesc
+    if cli.by == pakmap::cli::AurBy::NameDesc
+        && cfg.effective_aur_by() != pakmap::cli::AurBy::NameDesc
     {
         cli.by = cfg.effective_aur_by();
     }
@@ -90,13 +90,13 @@ async fn main() -> anyhow::Result<()> {
     if should_tui {
         if !is_tty {
             eprintln!("Error: --tui requires a terminal (TTY).");
-            eprintln!("Try: pacseek <query> --no-tui   or   pacseek --help");
+            eprintln!("Try: pakmap <query> --no-tui   or   pakmap --help");
             eprintln!("Tip: In headless/CI, use --json or --no-tui");
             std::process::exit(1);
         }
         let initial = cli.query.clone().unwrap_or_default();
         // TUI owns terminal lifecycle — color_eyre installed inside tui::run per ratatui skill
-        return pacseek::tui::run_with_config(initial, &cli, &cfg)
+        return pakmap::tui::run_with_config(initial, &cli, &cfg)
             .map_err(|e| anyhow::anyhow!("{e}"));
     }
     // Tracing init: all remaining paths are one-shot CLI. Logs go to stderr:
@@ -123,9 +123,9 @@ async fn main() -> anyhow::Result<()> {
         }
         // Perf P3: repo check joins the async fan-out instead of blocking it.
         let repo_fut = async {
-            let timer = pacseek::timing::start("repo-updates");
+            let timer = pakmap::timing::start("repo-updates");
             let out =
-                task::spawn_blocking(|| pacseek::updates::check_repo_updates().unwrap_or_default())
+                task::spawn_blocking(|| pakmap::updates::check_repo_updates().unwrap_or_default())
                     .await
                     .unwrap_or_default();
             timer.finish(out.len());
@@ -134,23 +134,23 @@ async fn main() -> anyhow::Result<()> {
         // AUR check needs async client; reuse timeout from config.
         let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
         let client = reqwest::Client::builder()
-            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
             .build();
         let mut all = Vec::new();
         if let Ok(client) = client {
             let aur_fut = async {
-                let timer = pacseek::timing::start("aur-updates");
-                let aur = pacseek::updates::check_aur_updates(&client, &cfg).await;
+                let timer = pakmap::timing::start("aur-updates");
+                let aur = pakmap::updates::check_aur_updates(&client, &cfg).await;
                 timer.finish(aur.len());
                 aur
             };
             // Flatpak updates via remote-info (fail-open empty when disabled/offline).
             let cfg_fp = cfg.clone();
             let fp_fut = async {
-                let timer = pacseek::timing::start("flatpak-updates");
+                let timer = pakmap::timing::start("flatpak-updates");
                 let out = task::spawn_blocking(move || {
-                    pacseek::sources::check_flatpak_updates_cached(&cfg_fp)
+                    pakmap::sources::check_flatpak_updates_cached(&cfg_fp)
                 })
                 .await
                 .unwrap_or_default();
@@ -166,17 +166,17 @@ async fn main() -> anyhow::Result<()> {
             all.extend(repo_fut.await);
         }
         all.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
-        pacseek::output::print_updates(&all, cli.json, cli.no_color)?;
+        pakmap::output::print_updates(&all, cli.json, cli.no_color)?;
         return Ok(());
     }
     if cli.orphans {
         if cli.no_color || std::env::var("NO_COLOR").is_ok() {
             colored::control::set_override(false);
         }
-        let orphans = pacseek::orphans::list_orphans()
-            .or_else(|_| pacseek::orphans::list_orphans_fallback())
+        let orphans = pakmap::orphans::list_orphans()
+            .or_else(|_| pakmap::orphans::list_orphans_fallback())
             .unwrap_or_default();
-        pacseek::output::print_orphans(&orphans, cli.json, cli.no_color)?;
+        pakmap::output::print_orphans(&orphans, cli.json, cli.no_color)?;
         return Ok(());
     }
     if cli.stats {
@@ -187,25 +187,25 @@ async fn main() -> anyhow::Result<()> {
         // once and reuses the list for the updates check (single scan).
         let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
         let client = reqwest::Client::builder()
-            .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
             .build();
         let local_fut = async {
-            let timer = pacseek::timing::start("local-stats");
-            let out = match task::spawn_blocking(pacseek::stats::gather_local_stats).await {
+            let timer = pakmap::timing::start("local-stats");
+            let out = match task::spawn_blocking(pakmap::stats::gather_local_stats).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(err=?e, "spawn_blocking JoinError (local stats panicked)");
-                    pacseek::stats::SysStats::default()
+                    pakmap::stats::SysStats::default()
                 }
             };
             timer.finish(out.explicit.saturating_add(out.dependencies));
             out
         };
         let aur_fut = async {
-            let timer = pacseek::timing::start("aur-updates");
+            let timer = pakmap::timing::start("aur-updates");
             let out = match client {
-                Ok(client) => pacseek::updates::check_aur_updates(&client, &cfg).await,
+                Ok(client) => pakmap::updates::check_aur_updates(&client, &cfg).await,
                 Err(_) => vec![],
             };
             timer.finish(out.len());
@@ -216,9 +216,9 @@ async fn main() -> anyhow::Result<()> {
             if !cfg_fp.flatpak_enabled() {
                 return (0usize, 0usize);
             }
-            let timer = pacseek::timing::start("flatpak-list");
+            let timer = pakmap::timing::start("flatpak-list");
             // Perf P4: cached inventory shared with the updates check below.
-            let listed = match task::spawn_blocking(pacseek::sources::list_installed_cached).await {
+            let listed = match task::spawn_blocking(pakmap::sources::list_installed_cached).await {
                 Ok(Ok(v)) => v,
                 Ok(Err(e)) => {
                     tracing::warn!(err=?e, "flatpak list failed");
@@ -231,9 +231,9 @@ async fn main() -> anyhow::Result<()> {
             };
             timer.finish(listed.len());
             let n_listed = listed.len();
-            let timer = pacseek::timing::start("flatpak-updates");
+            let timer = pakmap::timing::start("flatpak-updates");
             let up = task::spawn_blocking(move || {
-                pacseek::sources::check_flatpak_updates_cached_for(&listed, &cfg_fp)
+                pakmap::sources::check_flatpak_updates_cached_for(&listed, &cfg_fp)
             })
             .await
             .unwrap_or_default();
@@ -244,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
         stats.updates_aur = aur_n;
         stats.flatpak_installed = fp_n;
         stats.updates_flatpak = fp_up;
-        pacseek::output::print_stats(&stats, cli.json, cli.no_color)?;
+        pakmap::output::print_stats(&stats, cli.json, cli.no_color)?;
         return Ok(());
     }
 
@@ -260,10 +260,10 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
         // News guard unless explicitly non-interactive.
-        let noconfirm_env = std::env::var("PACSEEK_NOCONFIRM").is_ok();
+        let noconfirm_env = std::env::var("PAKMAP_NOCONFIRM").is_ok();
         if !noconfirm_env {
-            let news = pacseek::news::fetch_arch_news(&cfg);
-            if pacseek::news::has_intervention(&news, true) {
+            let news = pakmap::news::fetch_arch_news(&cfg);
+            if pakmap::news::has_intervention(&news, true) {
                 eprintln!("⚠ Arch news reports manual intervention may be required:");
                 for item in news.iter().filter(|i| i.needs_action).take(3) {
                     eprintln!("  • {} ({})", item.title, item.link);
@@ -283,7 +283,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 } else if !cfg.upgrade_noconfirm() {
                     eprintln!(
-                        "refusing to upgrade without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 to force"
+                        "refusing to upgrade without confirmation (no TTY); set PAKMAP_NOCONFIRM=1 to force"
                     );
                     std::process::exit(2);
                 }
@@ -304,20 +304,20 @@ async fn main() -> anyhow::Result<()> {
             }
         } else if !noconfirm {
             eprintln!(
-                "refusing to upgrade without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+                "refusing to upgrade without confirmation (no TTY); set PAKMAP_NOCONFIRM=1 for scripts"
             );
             std::process::exit(2);
         }
-        match pacseek::install::upgrade::upgrade_system(&cfg) {
+        match pakmap::install::upgrade::upgrade_system(&cfg) {
             Ok(()) => {
                 // Flatpak refs upgrade alongside (fail-open when absent).
                 // Best-effort: a flatpak failure warns but keeps the pacman
                 // upgrade's success (scripts see exit 0 + stderr note).
                 // Refresh update memos so the Updates tab is current.
-                pacseek::updates::invalidate_aur_memo();
-                pacseek::sources::invalidate_flatpak_memo();
-                pacseek::sources::invalidate_flatpak_list_memo();
-                if let Err(e) = pacseek::sources::update_all_flatpak(&cfg) {
+                pakmap::updates::invalidate_aur_memo();
+                pakmap::sources::invalidate_flatpak_memo();
+                pakmap::sources::invalidate_flatpak_list_memo();
+                if let Err(e) = pakmap::sources::update_all_flatpak(&cfg) {
                     eprintln!("warning: flatpak update failed: {}", e);
                 }
                 println!("System upgraded");
@@ -344,7 +344,7 @@ async fn main() -> anyhow::Result<()> {
             colored::control::set_override(false);
         }
         let keep = cfg.effective_keep(cli.keep);
-        let preview = match pacseek::install::clean::preview_clean(keep) {
+        let preview = match pakmap::install::clean::preview_clean(keep) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("clean failed: {}", e);
@@ -352,11 +352,11 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         if cli.dry_run || cli.json {
-            pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
+            pakmap::output::print_clean(&preview, true, cli.json, cli.no_color)?;
             // Flatpak has no byte preview; say so instead of silence.
             if !cli.json
                 && cfg.flatpak_enabled()
-                && pacseek::sources::has_flatpak()
+                && pakmap::sources::has_flatpak()
                 && preview.files > 0
             {
                 eprintln!("+ unused flatpak runtimes (no preview available)");
@@ -364,9 +364,9 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         // P5: unused flatpak runtimes clean alongside paccache when available.
-        let flatpak_clean = cfg.flatpak_enabled() && pacseek::sources::has_flatpak();
+        let flatpak_clean = cfg.flatpak_enabled() && pakmap::sources::has_flatpak();
         if preview.files == 0 && !flatpak_clean {
-            pacseek::output::print_clean(&preview, true, cli.json, cli.no_color)?;
+            pakmap::output::print_clean(&preview, true, cli.json, cli.no_color)?;
             return Ok(());
         }
         let noconfirm = cfg.clean_noconfirm();
@@ -374,7 +374,7 @@ async fn main() -> anyhow::Result<()> {
             let stdin = std::io::stdin();
             let mut input = stdin.lock();
             let mut output = std::io::stderr();
-            let size = pacseek::stats::human_bytes(preview.bytes);
+            let size = pakmap::stats::human_bytes(preview.bytes);
             let prompt = if preview.files == 0 {
                 "Pacman cache already clean. Remove unused flatpak runtimes?".to_string()
             } else if flatpak_clean {
@@ -394,16 +394,16 @@ async fn main() -> anyhow::Result<()> {
             }
         } else if !noconfirm {
             eprintln!(
-                "refusing to clean without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+                "refusing to clean without confirmation (no TTY); set PAKMAP_NOCONFIRM=1 for scripts"
             );
             std::process::exit(2);
         }
         // The confirm above covers both stages: force -y downstream so neither
         // tool re-prompts after the user already said yes.
         if preview.files > 0 {
-            match pacseek::install::clean::run_clean(&cfg, keep) {
+            match pakmap::install::clean::run_clean(&cfg, keep) {
                 Ok(()) => {
-                    pacseek::output::print_clean(&preview, false, cli.json, cli.no_color)?;
+                    pakmap::output::print_clean(&preview, false, cli.json, cli.no_color)?;
                 }
                 Err(e) => {
                     eprintln!("clean failed: {}", e);
@@ -414,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
         if flatpak_clean {
             let mut cfg_fp = cfg.clone();
             cfg_fp.behavior.flatpak_noconfirm = true;
-            match pacseek::sources::clean_unused_flatpak(&cfg_fp) {
+            match pakmap::sources::clean_unused_flatpak(&cfg_fp) {
                 Ok(()) => {
                     println!("✓ Removed unused flatpak runtimes");
                 }
@@ -443,8 +443,8 @@ async fn main() -> anyhow::Result<()> {
         // without sudo. Shape + installed-state gate avoids misrouting pacman
         // names; readonly already refused above.
         let is_flatpak = cfg.flatpak_enabled()
-            && pacseek::sources::validate_app_id(&name).is_ok()
-            && pacseek::sources::is_flatpak_installed(&name);
+            && pakmap::sources::validate_app_id(&name).is_ok()
+            && pakmap::sources::is_flatpak_installed(&name);
         // Either noconfirm flag covers --remove end-to-end (flatpak -y and
         // pacman --noconfirm alike) so scripts need only one knob.
         let noconfirm = cfg.remove_noconfirm() || (is_flatpak && cfg.flatpak_noconfirm());
@@ -463,7 +463,7 @@ async fn main() -> anyhow::Result<()> {
             }
         } else if !noconfirm {
             eprintln!(
-                "refusing to remove without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+                "refusing to remove without confirmation (no TTY); set PAKMAP_NOCONFIRM=1 for scripts"
             );
             std::process::exit(2);
         }
@@ -473,15 +473,15 @@ async fn main() -> anyhow::Result<()> {
             if noconfirm {
                 cfg_fp.behavior.flatpak_noconfirm = true;
             }
-            pacseek::sources::remove_flatpak_package(&name, &cfg_fp)
+            pakmap::sources::remove_flatpak_package(&name, &cfg_fp)
         } else {
-            pacseek::install::remove::remove_package_with_config(&name, &cfg)
+            pakmap::install::remove::remove_package_with_config(&name, &cfg)
         };
         match res {
             Ok(()) => {
                 // Installed set changed — updates + inventory memos are stale.
-                pacseek::sources::invalidate_flatpak_memo();
-                pacseek::sources::invalidate_flatpak_list_memo();
+                pakmap::sources::invalidate_flatpak_memo();
+                pakmap::sources::invalidate_flatpak_list_memo();
                 println!("Removed {}", name.trim());
                 return Ok(());
             }
@@ -519,11 +519,11 @@ async fn main() -> anyhow::Result<()> {
             }
         } else if !noconfirm {
             eprintln!(
-                "refusing to refresh without confirmation (no TTY); set PACSEEK_NOCONFIRM=1 for scripts"
+                "refusing to refresh without confirmation (no TTY); set PAKMAP_NOCONFIRM=1 for scripts"
             );
             std::process::exit(2);
         }
-        match pacseek::install::refresh::refresh_sync_db(&cfg) {
+        match pakmap::install::refresh::refresh_sync_db(&cfg) {
             Ok(()) => {
                 println!("Sync databases refreshed");
                 return Ok(());
@@ -540,8 +540,8 @@ async fn main() -> anyhow::Result<()> {
     let query = match cli.query {
         Some(q) if !q.trim().is_empty() => q,
         _ => {
-            eprintln!("Usage: pacseek <query>  or  pacseek --tui");
-            eprintln!("Try 'pacseek --help' for more information.");
+            eprintln!("Usage: pakmap <query>  or  pakmap --tui");
+            eprintln!("Try 'pakmap --help' for more information.");
             std::process::exit(2);
         }
     };
@@ -552,7 +552,7 @@ async fn main() -> anyhow::Result<()> {
 
     let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
     let client = reqwest::Client::builder()
-        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
         .timeout(timeout)
         .build()?;
 
@@ -580,7 +580,7 @@ async fn main() -> anyhow::Result<()> {
             Vec::new()
         } else {
             // P1 perf: time the backend (warns over budget at default verbosity).
-            let timer = pacseek::timing::start("repo-search");
+            let timer = pakmap::timing::start("repo-search");
             let res = task::spawn_blocking(move || {
                 match search_repo(&query_repo, limit_repo, regex_repo, installed_only) {
                     Ok(v) => v,
@@ -619,7 +619,7 @@ async fn main() -> anyhow::Result<()> {
         if !aur_enabled {
             Vec::new()
         } else {
-            let timer = pacseek::timing::start("aur-search");
+            let timer = pakmap::timing::start("aur-search");
             let out = match search_aur_with_config(
                 &client, &query_aur, &by_str, limit_aur, regex_aur, &cfg,
             )
@@ -645,7 +645,7 @@ async fn main() -> anyhow::Result<()> {
         if !flatpak_enabled {
             Vec::new()
         } else {
-            let timer = pacseek::timing::start("flatpak-search");
+            let timer = pakmap::timing::start("flatpak-search");
             let q = query_flatpak.clone();
             let res = task::spawn_blocking(move || {
                 search_flatpak_with_config(&q, limit_flatpak, regex_flatpak, &cfg_flatpak)
@@ -691,7 +691,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let total_timer = pacseek::timing::start("search-total");
+    let total_timer = pakmap::timing::start("search-total");
     let (repo_packages, aur_packages, flatpak_packages) =
         tokio::join!(repo_future, aur_future, flatpak_future);
     total_timer.finish(

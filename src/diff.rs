@@ -7,7 +7,7 @@ pub fn cache_base(cfg: &crate::config::Config) -> PathBuf {
     }
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("pacseek")
+        .join("pakmap")
 }
 
 pub fn clone_dir_for(cfg: &crate::config::Config, name: &str) -> Option<PathBuf> {

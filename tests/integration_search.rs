@@ -6,16 +6,16 @@ use predicates::prelude::*;
 
 #[test]
 fn help_works() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("pacseek"));
+        .stdout(predicate::str::contains("pakmap"));
 }
 
 #[test]
 fn help_shows_refresh_flag() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
@@ -24,16 +24,16 @@ fn help_shows_refresh_flag() {
 
 #[test]
 fn version_works() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("pacseek"));
+        .stdout(predicate::str::contains("pakmap"));
 }
 
 #[test]
 fn repo_search_smoke() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.args(["firefox", "--source", "repo", "--limit", "2", "--no-color"])
         .assert()
         .success();
@@ -41,7 +41,7 @@ fn repo_search_smoke() {
 
 #[test]
 fn json_output_is_valid() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["neovim", "--limit", "1", "--json", "--no-color"])
         .output()
@@ -56,7 +56,7 @@ fn json_output_is_valid() {
 fn json_stdout_stays_pure() {
     // Logs (incl. backend timing warns) must go to stderr: stdout is the
     // data pipe. Regression: fmt subscriber once wrote to stdout.
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["neovim", "--limit", "1", "--json", "--no-color"])
         .output()
@@ -88,7 +88,7 @@ fn regex_recall_matches_substring() {
             "--regex",
         ],
     ] {
-        let mut cmd = Command::cargo_bin("pacseek").unwrap();
+        let mut cmd = Command::cargo_bin("pakmap").unwrap();
         let output = cmd.args(&args).output().unwrap();
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
@@ -101,7 +101,7 @@ fn regex_recall_matches_substring() {
 
 #[test]
 fn help_shows_new_maintenance_flags() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
@@ -113,7 +113,7 @@ fn help_shows_new_maintenance_flags() {
 
 #[test]
 fn updates_lists_valid_json() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd.args(["--updates", "--json"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -123,7 +123,7 @@ fn updates_lists_valid_json() {
 
 #[test]
 fn orphans_lists_valid_json() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd.args(["--orphans", "--json"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -133,7 +133,7 @@ fn orphans_lists_valid_json() {
 
 #[test]
 fn stats_valid_json() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd.args(["--stats", "--json"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -152,10 +152,10 @@ fn readonly_refuses_mutating_ops() {
         vec!["--readonly", "--refresh"],
         vec!["--readonly", "--upgrade"],
     ] {
-        let mut cmd = Command::cargo_bin("pacseek").unwrap();
+        let mut cmd = Command::cargo_bin("pakmap").unwrap();
         let output = cmd
             .args(&args)
-            .env("PACSEEK_NOCONFIRM", "1")
+            .env("PAKMAP_NOCONFIRM", "1")
             .output()
             .unwrap();
         assert!(
@@ -166,12 +166,12 @@ fn readonly_refuses_mutating_ops() {
 }
 
 fn paccache_present() -> bool {
-    pacseek::install::clean::has_paccache()
+    pakmap::install::clean::has_paccache()
 }
 
 #[test]
 fn help_shows_clean_flags() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
@@ -186,7 +186,7 @@ fn clean_dry_run_json_is_valid() {
     if !paccache_present() {
         return;
     }
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["--clean", "--dry-run", "--json"])
         .output()
@@ -200,17 +200,17 @@ fn clean_dry_run_json_is_valid() {
 
 #[test]
 fn readonly_refuses_clean() {
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["--readonly", "--clean", "--dry-run"])
-        .env("PACSEEK_NOCONFIRM", "1")
+        .env("PAKMAP_NOCONFIRM", "1")
         .output()
         .unwrap();
     assert!(!output.status.success());
 }
 
 fn flatpak_present() -> bool {
-    pacseek::sources::has_flatpak()
+    pakmap::sources::has_flatpak()
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn flatpak_source_json_is_valid() {
     if !flatpak_present() {
         return;
     }
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["firefox", "--source", "flatpak", "--limit", "3", "--json"])
         .output()
@@ -239,7 +239,7 @@ fn flatpak_source_respects_limit() {
     if !flatpak_present() {
         return;
     }
-    let mut cmd = Command::cargo_bin("pacseek").unwrap();
+    let mut cmd = Command::cargo_bin("pakmap").unwrap();
     let output = cmd
         .args(["firefox", "--source", "flatpak", "--limit", "1", "--json"])
         .output()

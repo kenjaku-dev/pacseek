@@ -311,7 +311,7 @@ pub fn validate_app_id(id: &str) -> anyhow::Result<String> {
 
 /// Args for `flatpak install` after the binary name, extracted for unit
 /// testing without spawning. No sudo — flatpak never needs it. `-y` only with
-/// noconfirm (scripts / PACSEEK_NOCONFIRM=1); otherwise flatpak asks.
+/// noconfirm (scripts / PAKMAP_NOCONFIRM=1); otherwise flatpak asks.
 pub fn install_command_args(remote: &str, id: &str, noconfirm: bool) -> Vec<String> {
     let mut args = vec!["install".to_string(), remote.to_string(), id.to_string()];
     if noconfirm {
@@ -1042,7 +1042,7 @@ mod tests {
     #[test]
     fn flatpak_memo_invalidate_is_safe() {
         invalidate_flatpak_memo();
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let cfg = crate::config::Config::default();

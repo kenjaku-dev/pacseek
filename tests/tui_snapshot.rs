@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! TUI snapshot tests (test-only crate: unwraps are idiomatic here).
 
-use pacseek::model::Package;
-use pacseek::tui::app::{App, Focus, Mode, Popup};
+use pakmap::model::Package;
+use pakmap::tui::app::{App, Focus, Mode, Popup};
 use ratatui::{Terminal, backend::TestBackend};
 
 fn sample_packages() -> Vec<Package> {
@@ -68,7 +68,7 @@ fn tui_renders_search_and_results() {
     app.status = "Found 3 (repo 1 aur 1 flatpak 1)".into();
     app.is_loading = false;
 
-    terminal.draw(|f| pacseek::tui::ui::draw(f, &app)).unwrap();
+    terminal.draw(|f| pakmap::tui::ui::draw(f, &app)).unwrap();
     let buf = terminal.backend().buffer().clone();
     // Convert buffer to lines for snapshot
     let lines: Vec<String> = (0..24)
@@ -93,7 +93,7 @@ fn tui_too_small_shows_message() {
     let backend = TestBackend::new(50, 8);
     let mut terminal = Terminal::new(backend).unwrap();
     let app = App::new("".into());
-    terminal.draw(|f| pacseek::tui::ui::draw(f, &app)).unwrap();
+    terminal.draw(|f| pakmap::tui::ui::draw(f, &app)).unwrap();
     let buf = terminal.backend().buffer().clone();
     let content = buf.content().iter().map(|c| c.symbol()).collect::<String>();
     assert!(content.contains("Terminal too small"));
@@ -106,7 +106,7 @@ fn tui_info_popup_renders() {
     let mut app = App::new("firefox".into());
     app.packages = sample_packages();
     app.popup = Popup::Info(sample_packages()[0].clone());
-    terminal.draw(|f| pacseek::tui::ui::draw(f, &app)).unwrap();
+    terminal.draw(|f| pakmap::tui::ui::draw(f, &app)).unwrap();
     let buf = terminal.backend().buffer().clone();
     let content = buf.content().iter().map(|c| c.symbol()).collect::<String>();
     assert!(content.contains("firefox"));
@@ -140,7 +140,7 @@ fn sample_installed() -> Vec<Package> {
 fn render(app: &App, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|f| pacseek::tui::ui::draw(f, app)).unwrap();
+    terminal.draw(|f| pakmap::tui::ui::draw(f, app)).unwrap();
     terminal
         .backend()
         .buffer()
@@ -259,7 +259,7 @@ fn tui_confirm_upgrade_popup_renders() {
 
 #[test]
 fn tui_ood_orphan_badges_render() {
-    use pacseek::model::Package;
+    use pakmap::model::Package;
     let mut aur = Package::minimal("foo".into(), "2-1".into(), "aur".into());
     aur.out_of_date = Some(1);
     aur.orphan = true;

@@ -1,4 +1,4 @@
-# pacseek config — copy to ~/.config/pacseek/config.toml and edit
+# pakmap config — copy to ~/.config/pakmap/config.toml and edit
 # All fields optional; missing = defaults. Changes apply on next launch.
 
 [search]

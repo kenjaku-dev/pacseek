@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! NaN/unicode edge tests (test-only crate: unwraps are idiomatic here).
 
-use pacseek::model::Package;
+use pakmap::model::Package;
 
 #[test]
 fn sort_with_nan_does_not_panic() {

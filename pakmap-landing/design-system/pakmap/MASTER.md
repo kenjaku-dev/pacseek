@@ -6,7 +6,7 @@
 
 ---
 
-**Project:** pacseek
+**Project:** pakmap
 **Generated:** 2026-09-21 22:27:38
 **Category:** Developer Tool / IDE
 **Design Dials:** Variance 7/10 (Balanced / Modern) | Motion 6/10 (Standard) | Density 4/10 (Standard)

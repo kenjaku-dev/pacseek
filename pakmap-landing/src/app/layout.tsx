@@ -11,11 +11,11 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "pacseek — Fast AUR + repo search for Arch",
+  title: "pakmap — Fast AUR + repo search for Arch",
   description:
     "One Rust binary for pacman and AUR search, with a terminal UI to install and remove packages. Built with ratatui and libalpm.",
   keywords: [
-    "pacseek",
+    "pakmap",
     "arch linux",
     "aur",
     "pacman",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     "package search",
   ],
   openGraph: {
-    title: "pacseek — Fast AUR + repo search for Arch",
+    title: "pakmap — Fast AUR + repo search for Arch",
     description:
       "Search official repos and the AUR, install from a TUI — one binary for Arch/Artix.",
     type: "website",

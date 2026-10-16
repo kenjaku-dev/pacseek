@@ -17,7 +17,7 @@ const FEATURES = [
     icon: Gauge,
     title: "One-shot CLI",
     description:
-      "pacseek firefox runs repo search first, AUR after — parallel tokio, libalpm local DB. Pipe with --json, filter with --regex and --limit.",
+      "pakmap firefox runs repo search first, AUR after — parallel tokio, libalpm local DB. Pipe with --json, filter with --regex and --limit.",
     wide: true,
   },
   {
@@ -45,7 +45,7 @@ const FEATURES = [
     icon: Paintbrush,
     title: "Themeable config",
     description:
-      "Colors, borders, layout, timeouts in ~/.config/pacseek/config.toml — no recompile.",
+      "Colors, borders, layout, timeouts in ~/.config/pakmap/config.toml — no recompile.",
     wide: false,
   },
   {

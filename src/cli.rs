@@ -4,10 +4,10 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "pacseek",
+    name = "pakmap",
     version,
     about = "Fast search for Arch/Artix official repos + AUR",
-    long_about = "Search both official pacman repositories (via libalpm) and the AUR (via RPC v5) in one command.\nExample: pacseek firefox --limit 20 --json\nTUI: pacseek --tui or pacseek (no args) launches interactive terminal (ratatui)",
+    long_about = "Search both official pacman repositories (via libalpm) and the AUR (via RPC v5) in one command.\nExample: pakmap firefox --limit 20 --json\nTUI: pakmap --tui or pakmap (no args) launches interactive terminal (ratatui)",
     arg_required_else_help = false
 )]
 pub struct Cli {
@@ -59,19 +59,19 @@ pub struct Cli {
     #[arg(long)]
     pub no_color: bool,
 
-    /// Path to config file (default: ~/.config/pacseek/config.toml or ./pacseek.toml)
+    /// Path to config file (default: ~/.config/pakmap/config.toml or ./pakmap.toml)
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
     /// Remove an installed package and exit — non-TUI shortcut for remover mode.
     /// Auto-detects flatpak app-IDs (reverse-DNS installed via flatpak) and
     /// uninstalls without sudo; otherwise sudo pacman -R.
-    /// Asks to confirm on TTY; bypass with PACSEEK_NOCONFIRM=1 (also skips makepkg/refresh prompts).
+    /// Asks to confirm on TTY; bypass with PAKMAP_NOCONFIRM=1 (also skips makepkg/refresh prompts).
     #[arg(long, value_name = "PKG")]
     pub remove: Option<String>,
 
     /// Refresh pacman sync databases (sudo pacman -Sy) and exit — non-TUI shortcut.
-    /// Asks to confirm on TTY; bypass with PACSEEK_NOCONFIRM=1.
+    /// Asks to confirm on TTY; bypass with PAKMAP_NOCONFIRM=1.
     #[arg(long)]
     pub refresh: bool,
 
@@ -88,7 +88,7 @@ pub struct Cli {
     pub stats: bool,
 
     /// Upgrade system (sudo pacman -Syu + AUR rebuild hint) — asks to confirm on TTY.
-    /// Honors Arch-news guard unless PACSEEK_NOCONFIRM=1.
+    /// Honors Arch-news guard unless PAKMAP_NOCONFIRM=1.
     #[arg(long)]
     pub upgrade: bool,
 

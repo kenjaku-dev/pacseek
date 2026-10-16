@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pacseek — automated build + install for Arch-family Linux.
+# pakmap — automated build + install for Arch-family Linux.
 # Usage:
 #   ./install.sh                 # release build + sudo install to /usr/local/bin
 #   ./install.sh --user          # install to ~/.cargo/bin (no sudo for binary)
@@ -18,7 +18,7 @@ PREFIX="/usr/local"
 USER_MODE=0
 ASSUME_YES=0
 SYNC_DB=1
-BIN_NAME="pacseek"
+BIN_NAME="pakmap"
 
 log() { printf '[install] %s\n' "$*"; }
 die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -51,7 +51,7 @@ fi
 
 # 1. Arch-family check (libalpm only exists here)
 if ! command -v pacman >/dev/null 2>&1; then
-  die "pacman not found — pacseek needs Arch/Artix/CachyOS/Endeavour (libalpm). Generic Linux is not supported for repo search."
+  die "pacman not found — pakmap needs Arch/Artix/CachyOS/Endeavour (libalpm). Generic Linux is not supported for repo search."
 fi
 
 SUDO=""
@@ -105,7 +105,7 @@ fi
 # 4. Build
 log "building release binary..."
 cargo build --release --locked
-ls -lh target/release/pacseek
+ls -lh target/release/pakmap
 
 # 5. Install
 if [[ $USER_MODE -eq 1 ]]; then

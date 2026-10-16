@@ -30,7 +30,7 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
     // Safety: refuse if running as root — makepkg must not be root per Arch Wiki + aur-package-guidelines
     if nix::unistd::geteuid().is_root() {
         anyhow::bail!(
-            "AUR install must not run as root — run pacseek as normal user, sudo will be used for pacman -U"
+            "AUR install must not run as root — run pakmap as normal user, sudo will be used for pacman -U"
         );
     }
 
@@ -54,14 +54,14 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
         anyhow::bail!("invalid package name: {:?}", name);
     }
 
-    // Determine cache dir: config [behavior]cache_dir or $XDG_CACHE_HOME/pacseek or ~/.cache/pacseek or /tmp/pacseek
+    // Determine cache dir: config [behavior]cache_dir or $XDG_CACHE_HOME/pakmap or ~/.cache/pakmap or /tmp/pakmap
     // Use 0o700 to avoid world-writable race in /tmp fallback (aur-makepkg)
     let cache_base = if let Some(p) = Config::load().cache_dir_path() {
         p
     } else {
         dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("pacseek")
+            .join("pakmap")
     };
     std::fs::create_dir_all(&cache_base).context("create cache dir")?;
     #[cfg(unix)]
@@ -186,9 +186,9 @@ pub fn install_aur_package(pkg: &crate::model::Package) -> anyhow::Result<()> {
 
     // Build & install via makepkg -si (aur-makepkg) — default asks, --noconfirm only if explicit
     // Consistency with repo.rs: repo uses `pacman -S --needed` without --noconfirm; AUR should also ask by default
-    // Enable non-interactive with PACSEEK_NOCONFIRM=1 or config behavior.makepkg_noconfirm
+    // Enable non-interactive with PAKMAP_NOCONFIRM=1 or config behavior.makepkg_noconfirm
     let cfg = Config::load();
-    let noconfirm = std::env::var("PACSEEK_NOCONFIRM").is_ok() || cfg.behavior.makepkg_noconfirm;
+    let noconfirm = std::env::var("PAKMAP_NOCONFIRM").is_ok() || cfg.behavior.makepkg_noconfirm;
     eprintln!(
         "\nBuilding and installing {} with makepkg -si{} ...",
         name,

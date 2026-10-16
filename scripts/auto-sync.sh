@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Auto-commit + push pacseek when working tree settles.
+# Auto-commit + push pakmap when working tree settles.
 #
 #   scripts/auto-sync.sh           start (background)
 #   scripts/auto-sync.sh --status  status
@@ -10,8 +10,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PIDFILE="${AUTO_SYNC_PIDFILE:-${TMPDIR:-/tmp}/pacseek-auto-sync.pid}"
-LOG="${AUTO_SYNC_LOG:-${TMPDIR:-/tmp}/pacseek-auto-sync.log}"
+PIDFILE="${AUTO_SYNC_PIDFILE:-${TMPDIR:-/tmp}/pakmap-auto-sync.pid}"
+LOG="${AUTO_SYNC_LOG:-${TMPDIR:-/tmp}/pakmap-auto-sync.log}"
 DEBOUNCE="${AUTO_SYNC_DEBOUNCE:-8}"
 POLL="${AUTO_SYNC_POLL:-3}"
 REMOTE="${AUTO_SYNC_REMOTE:-origin}"
@@ -48,8 +48,8 @@ commit_message() {
   paths="$(git diff --cached --name-only)"
   n="$(printf '%s\n' "$paths" | sed '/^$/d' | wc -l | tr -d ' ')"
   area="repo"
-  if printf '%s\n' "$paths" | grep -q '^pacseek-landing/' &&
-    ! printf '%s\n' "$paths" | grep -qv '^pacseek-landing/'; then
+  if printf '%s\n' "$paths" | grep -q '^pakmap-landing/' &&
+    ! printf '%s\n' "$paths" | grep -qv '^pakmap-landing/'; then
     area="landing"
   elif printf '%s\n' "$paths" | grep -qE '^(src/|tests/|Cargo\.|rustfmt)' &&
     ! printf '%s\n' "$paths" | grep -qvE '^(src/|tests/|Cargo\.|rustfmt|Makefile|README|config\.example|INSTALL|context|LICENSE|\.github)'; then
@@ -93,7 +93,7 @@ do_sync() {
   local msg
   msg="$(commit_message)"
   git -c user.name="${GIT_AUTHOR_NAME:-$(git config user.name || echo achraf)}" \
-      -c user.email="${GIT_AUTHOR_EMAIL:-$(git config user.email || echo achraf@pacseek.local)}" \
+      -c user.email="${GIT_AUTHOR_EMAIL:-$(git config user.email || echo achraf@pakmap.local)}" \
       commit -q -m "$msg"
   log "committed: $msg"
 

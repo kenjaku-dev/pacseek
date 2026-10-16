@@ -5,20 +5,20 @@ import { SpotlightCard } from "./ui/SpotlightCard";
 const BLOCKS = [
   {
     label: "From source (recommended)",
-    command: `git clone https://github.com/kenjaku-dev/pacseek
-cd pacseek
+    command: `git clone https://github.com/kenjaku-dev/pakmap
+cd pakmap
 cargo install --path . --force`,
   },
   {
     label: "Release binary",
     command: `cargo build --release
-sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek`,
+sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap`,
   },
   {
     label: "Everyday use",
-    command: `pacseek                 # TUI (TTY)
-pacseek firefox --no-tui  # CLI / scripts
-pacseek --init-config     # write config.toml`,
+    command: `pakmap                 # TUI (TTY)
+pakmap firefox --no-tui  # CLI / scripts
+pakmap --init-config     # write config.toml`,
   },
 ] as const;
 

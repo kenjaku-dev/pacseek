@@ -1,7 +1,7 @@
 //! Bounded subprocess runner (perf P2: bound every background wait).
 //!
 //! `resilience-failure`: an unbounded `Command::wait` is how a stuck child
-//! hangs the UI/CLI forever. Every background spawn in pacseek goes through
+//! hangs the UI/CLI forever. Every background spawn in pakmap goes through
 //! here: poll `try_wait()` and `kill()` on expiry so no caller blocks past
 //! its budget. Returns `None` on timeout/spawn failure — callers map that to
 //! their fail-open empty or install-hint error, never a panic.

@@ -1,11 +1,11 @@
 [package]
-name = "pacseek"
+name = "pakmap"
 version = "0.6.0"
 edition = "2024"
 description = "Fast package search for Arch/Artix official repos and AUR — written in Rust"
 authors = ["achraf"]
 license = "MIT"
-repository = "https://github.com/kenjaku-dev/pacseek"
+repository = "https://github.com/kenjaku-dev/pakmap"
 keywords = ["aur", "pacman", "alpm", "arch", "search"]
 categories = ["command-line-utilities"]
 readme = "README.md"

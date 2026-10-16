@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pacseek manual updater: fast-forward pull + release rebuild + reinstall.
+# pakmap manual updater: fast-forward pull + release rebuild + reinstall.
 # Usage:
 #   ./update.sh                 # rebuild + sudo reinstall to /usr/local/bin
 #   ./update.sh --user          # rebuild + reinstall to ~/.cargo/bin (no sudo)
@@ -15,7 +15,7 @@ set -euo pipefail
 PREFIX="/usr/local"
 USER_MODE=0
 CHECK_ONLY=0
-BIN_NAME="pacseek"
+BIN_NAME="pakmap"
 
 log() { printf '[update] %s\n' "$*"; }
 die() { printf '[update] ERROR: %s\n' "$*" >&2; exit 1; }

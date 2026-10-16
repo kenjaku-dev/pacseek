@@ -38,7 +38,7 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
             landing:
-              - 'pacseek-landing/**'
+              - 'pakmap-landing/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/pages.yml'
 
@@ -74,12 +74,12 @@ jobs:
 
       - name: Unit tests (lib, offline)
         env:
-          PACSEEK_SKIP_LIVE: "1"
+          PAKMAP_SKIP_LIVE: "1"
         run: cargo test --locked --lib 2>&1 | tee /tmp/unit-lib.log
 
       - name: Unit tests (snapshot, offline)
         env:
-          PACSEEK_SKIP_LIVE: "1"
+          PAKMAP_SKIP_LIVE: "1"
         run: cargo test --locked --test aur_nan --test tui_snapshot 2>&1 | tee /tmp/unit-snap.log
 
       - name: Report failing tests
@@ -106,7 +106,7 @@ jobs:
       - name: Release binary (size check)
         run: |
           cargo build --release --locked
-          ls -lh target/release/pacseek
+          ls -lh target/release/pakmap
 
   landing:
     name: Landing (lint · typecheck · build)
@@ -116,19 +116,19 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: pacseek-landing
+        working-directory: pakmap-landing
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: pacseek-landing/package.json
+          package_json_file: pakmap-landing/package.json
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: pacseek-landing/pnpm-lock.yaml
+          cache-dependency-path: pakmap-landing/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile

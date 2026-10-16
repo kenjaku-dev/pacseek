@@ -231,7 +231,7 @@ pub fn print_orphans(pkgs: &[Package], json: bool, no_color: bool) -> anyhow::Re
     );
     eprintln!(
         "{}",
-        "Remove with: pacseek --remove <pkg>  (or Tab remover in TUI)".dimmed()
+        "Remove with: pakmap --remove <pkg>  (or Tab remover in TUI)".dimmed()
     );
     Ok(())
 }
@@ -276,8 +276,8 @@ pub fn print_stats(
     );
     println!(
         "{} {}",
-        "pacseek cache:".bold(),
-        crate::stats::human_bytes(stats.cache_pacseek_bytes).dimmed()
+        "pakmap cache:".bold(),
+        crate::stats::human_bytes(stats.cache_pakmap_bytes).dimmed()
     );
     Ok(())
 }

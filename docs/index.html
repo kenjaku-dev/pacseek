@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>pacseek — AUR + official repo search with a TUI, for Arch &amp; Artix</title>
-<meta name="description" content="pacseek: fast AUR + official repo search with TUI install/remove for Arch / Artix. One Rust binary, ratatui + libalpm." />
+<title>pakmap — AUR + official repo search with a TUI, for Arch &amp; Artix</title>
+<meta name="description" content="pakmap: fast AUR + official repo search with TUI install/remove for Arch / Artix. One Rust binary, ratatui + libalpm." />
 <meta name="theme-color" content="#07090d" />
-<meta property="og:title" content="pacseek — search pacman + AUR in one keystroke" />
+<meta property="og:title" content="pakmap — search pacman + AUR in one keystroke" />
 <meta property="og:description" content="Fast AUR + official repo search with TUI install/remove for Arch / Artix — Rust + ratatui." />
-<meta property="og:image" content="https://opengraph.githubassets.com/1/kenjaku-dev/pacseek" />
+<meta property="og:image" content="https://opengraph.githubassets.com/1/kenjaku-dev/pakmap" />
 <meta name="twitter:card" content="summary_large_image" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%231793d1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230b1220'/%3E%3Ccircle cx='28' cy='28' r='14' fill='none' stroke='url(%23g)' stroke-width='6'/%3E%3Cpath d='M38 38l12 12' stroke='url(%23g)' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -299,9 +299,9 @@
 <!-- ================= NAV ================= -->
 <header class="nav" id="nav">
   <div class="wrap nav-in">
-    <a class="brand" href="#top" aria-label="pacseek home">
+    <a class="brand" href="#top" aria-label="pakmap home">
       <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#1793d1"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="#0b1220" stroke="rgba(255,255,255,.12)"/><circle cx="28" cy="28" r="13" fill="none" stroke="url(#lg)" stroke-width="6"/><path d="M38 38l12 12" stroke="url(#lg)" stroke-width="7" stroke-linecap="round"/><path d="M28 21l6 12h-12z" fill="#22d3ee" opacity=".85"/></svg>
-      pacseek <span class="v">v0.4.1</span>
+      pakmap <span class="v">v0.4.1</span>
     </a>
     <nav class="nav-links" aria-label="Sections">
       <a href="#demo">Demo</a>
@@ -311,7 +311,7 @@
       <a href="#install">Install</a>
     </nav>
     <div class="nav-cta">
-      <a class="gh" id="gh" href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">
+      <a class="gh" id="gh" href="https://github.com/kenjaku-dev/pakmap" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
         GitHub
         <span class="stars"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.31l-3.75 1.98a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg><b id="starCount">0</b></span>
@@ -324,13 +324,13 @@
 <!-- ================= HERO ================= -->
 <div class="hero">
   <div class="wrap">
-    <a class="pill reveal" href="https://github.com/kenjaku-dev/pacseek/releases" target="_blank" rel="noopener"><b>NEW</b> v0.4.1 — remover mode, refresh &amp; TOML theming →</a>
+    <a class="pill reveal" href="https://github.com/kenjaku-dev/pakmap/releases" target="_blank" rel="noopener"><b>NEW</b> v0.4.1 — remover mode, refresh &amp; TOML theming →</a>
     <h1 class="reveal"><span class="grad">pacman + AUR.</span><br/>One search bar.</h1>
     <p class="lede reveal">Fast <strong>official repo + AUR</strong> search with a real terminal UI to install and remove packages on <strong>Arch</strong> &amp; <strong>Artix</strong>. One Rust binary for both <code>pacman -Ss</code> and AUR <code>RPC v5</code>.</p>
     <div class="hero-ctas reveal">
       <a class="btn btn-primary" href="#install">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
-        Install pacseek
+        Install pakmap
       </a>
       <a class="btn btn-ghost" href="#demo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5M12 19h8"/></svg>
@@ -339,8 +339,8 @@
     </div>
     <div class="oneliner reveal">
       <span class="p">$</span>
-      <span class="cmd" id="oneliner">git clone https://github.com/kenjaku-dev/pacseek &amp;&amp; cd pacseek &amp;&amp; ./install.sh</span>
-      <button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek && cd pacseek && ./install.sh" aria-label="Copy install command">
+      <span class="cmd" id="oneliner">git clone https://github.com/kenjaku-dev/pakmap &amp;&amp; cd pakmap &amp;&amp; ./install.sh</span>
+      <button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pakmap && cd pakmap && ./install.sh" aria-label="Copy install command">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span>
       </button>
     </div>
@@ -358,10 +358,10 @@
 <div class="demo" id="demo">
   <div class="wrap">
     <div class="term-wrap reveal">
-      <div class="term" id="term" tabindex="0" role="application" aria-label="Interactive pacseek TUI demo. Type to search, arrows to move, Enter to install, i for info, Tab to switch modes, ? for help.">
+      <div class="term" id="term" tabindex="0" role="application" aria-label="Interactive pakmap TUI demo. Type to search, arrows to move, Enter to install, i for info, Tab to switch modes, ? for help.">
         <div class="term-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="term-title">~ — pacseek --tui</span>
+          <span class="term-title">~ — pakmap --tui</span>
           <span class="live auto" id="liveTag">autoplay</span>
         </div>
         <div class="screen" id="screen">
@@ -408,7 +408,7 @@
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
         <h3>One search, both worlds</h3>
         <p>Official repos via the local <code>libalpm</code> sync DB and the AUR via RPC v5, queried in parallel with <code>tokio</code>. Repo results come first, AUR after. Falls back to <code>pacman -Ss</code> when needed.</p>
-        <div class="mini"><span class="c-p">$</span> pacseek firefox
+        <div class="mini"><span class="c-p">$</span> pakmap firefox
 <span class="r-extra">extra/</span><b>firefox</b> 131.0-1 <span class="inst">[installed]</span>
 <span class="r-aur">aur/</span><b>firefox-bin</b> 131.0-1 <span class="votes">(+1200 5.2)</span></div>
       </div>
@@ -430,12 +430,12 @@
       <div class="card reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg></div>
         <h3>Script-friendly</h3>
-        <p>Use <code>--json</code>, <code>--no-tui</code> or <code>--no-color</code>, and <code>NO_COLOR</code> is respected. <code>--remove</code> and <code>--refresh</code> work as one-shots, and <code>PACSEEK_NOCONFIRM=1</code> skips the prompts.</p>
+        <p>Use <code>--json</code>, <code>--no-tui</code> or <code>--no-color</code>, and <code>NO_COLOR</code> is respected. <code>--remove</code> and <code>--refresh</code> work as one-shots, and <code>PAKMAP_NOCONFIRM=1</code> skips the prompts.</p>
       </div>
       <div class="card reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></div>
         <h3>TOML config</h3>
-        <p>Change colors, borders, layout and timeouts in <code>config.toml</code> without recompiling. Drop a <code>./pacseek.toml</code> in a folder for project-local settings.</p>
+        <p>Change colors, borders, layout and timeouts in <code>config.toml</code> without recompiling. Drop a <code>./pakmap.toml</code> in a folder for project-local settings.</p>
       </div>
       <div class="card span2 reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
@@ -489,7 +489,7 @@
           <li>An empty filter lists every installed package; type to narrow it down</li>
           <li><code>Enter</code> / <code>d</code> / <code>x</code> → confirm popup with a <code>pacman -Qi</code> preview</li>
           <li>Runs <code>sudo pacman -Rs</code>, so orphaned deps go too</li>
-          <li><code>pacseek --remove &lt;pkg&gt;</code> does the same from scripts</li>
+          <li><code>pakmap --remove &lt;pkg&gt;</code> does the same from scripts</li>
         </ul>
       </div>
     </div>
@@ -525,7 +525,7 @@
     <div class="head reveal">
       <span class="eyebrow">CLI</span>
       <h2>Prefer one-shots? Skip the TUI.</h2>
-      <p class="sub">Run <code>pacseek &lt;query&gt;</code> for plain output you can pipe, filter and script. With no args on a TTY, the TUI opens.</p>
+      <p class="sub">Run <code>pakmap &lt;query&gt;</code> for plain output you can pipe, filter and script. With no args on a TTY, the TUI opens.</p>
     </div>
     <div class="reveal">
       <div class="tabs" data-group="usage" role="tablist">
@@ -535,8 +535,8 @@
         <button data-tab="manage">Remove &amp; refresh</button>
       </div>
       <div class="panel on" data-group="usage" data-panel="search">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek firefox --limit 5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>pacseek firefox <span class="c-f">--limit</span> <span class="c-n">5</span>
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pakmap firefox --limit 5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>pakmap firefox <span class="c-f">--limit</span> <span class="c-n">5</span>
 <span class="r-extra">extra/</span><b>firefox</b> 131.0-1 <span class="inst">[installed]</span>
     <span class="c-o">Fast, Private &amp; Safe Web Browser</span>
 <span class="r-extra">extra/</span><b>firefox-developer-edition</b> 132.0b5-1
@@ -547,12 +547,12 @@
     <span class="c-o">Nightly build of Firefox</span>
 
 <span class="c-c"># no args on a TTY → TUI</span>
-<span class="c-p">$ </span>pacseek
-<span class="c-p">$ </span>pacseek <span class="c-f">--tui</span></pre></div>
+<span class="c-p">$ </span>pakmap
+<span class="c-p">$ </span>pakmap <span class="c-f">--tui</span></pre></div>
       </div>
       <div class="panel" data-group="usage" data-panel="json">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek neovim --json --limit 1 | jq '.[0]'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>pacseek neovim <span class="c-f">--json</span> <span class="c-f">--limit</span> <span class="c-n">1</span> | jq <span class="c-s">'.[0]'</span>
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pakmap neovim --json --limit 1 | jq '.[0]'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+<pre><span class="c-p">$ </span>pakmap neovim <span class="c-f">--json</span> <span class="c-f">--limit</span> <span class="c-n">1</span> | jq <span class="c-s">'.[0]'</span>
 {
   <span class="c-k">"name"</span>: <span class="c-s">"neovim"</span>,
   <span class="c-k">"version"</span>: <span class="c-s">"0.10.2-1"</span>,
@@ -567,31 +567,31 @@
 }</pre></div>
       </div>
       <div class="panel" data-group="usage" data-panel="filters">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy='pacseek yay --source aur --by name --limit 5'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy='pakmap yay --source aur --by name --limit 5'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
 <pre><span class="c-c"># AUR only, match by name</span>
-<span class="c-p">$ </span>pacseek yay <span class="c-f">--source</span> aur <span class="c-f">--by</span> name <span class="c-f">--limit</span> <span class="c-n">5</span>
+<span class="c-p">$ </span>pakmap yay <span class="c-f">--source</span> aur <span class="c-f">--by</span> name <span class="c-f">--limit</span> <span class="c-n">5</span>
 
 <span class="c-c"># regex (libalpm regex for repo, client-side for AUR)</span>
-<span class="c-p">$ </span>pacseek <span class="c-s">"linux.*headers"</span> <span class="c-f">--regex</span>
+<span class="c-p">$ </span>pakmap <span class="c-s">"linux.*headers"</span> <span class="c-f">--regex</span>
 
 <span class="c-c"># only what's already installed</span>
-<span class="c-p">$ </span>pacseek rust <span class="c-f">--installed-only</span>
+<span class="c-p">$ </span>pakmap rust <span class="c-f">--installed-only</span>
 
 <span class="c-c"># AUR first, no colors, no TUI (great for pipes)</span>
-<span class="c-p">$ </span>pacseek python <span class="c-f">--bottom-up</span> <span class="c-f">--no-color</span> <span class="c-f">--no-tui</span>
+<span class="c-p">$ </span>pakmap python <span class="c-f">--bottom-up</span> <span class="c-f">--no-color</span> <span class="c-f">--no-tui</span>
 
 <span class="c-c"># --source  aur | repo | all     --by  name | name-desc | maintainer …</span></pre></div>
       </div>
       <div class="panel" data-group="usage" data-panel="manage">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pacseek --remove htop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="pakmap --remove htop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
 <pre><span class="c-c"># remove a package (asks to confirm on a TTY)</span>
-<span class="c-p">$ </span>pacseek <span class="c-f">--remove</span> htop
+<span class="c-p">$ </span>pakmap <span class="c-f">--remove</span> htop
 
 <span class="c-c"># unattended: skip remove / makepkg / refresh prompts</span>
-<span class="c-p">$ </span><span class="c-k">PACSEEK_NOCONFIRM</span>=<span class="c-n">1</span> pacseek <span class="c-f">--remove</span> htop
+<span class="c-p">$ </span><span class="c-k">PAKMAP_NOCONFIRM</span>=<span class="c-n">1</span> pakmap <span class="c-f">--remove</span> htop
 
 <span class="c-c"># refresh sync databases (sudo pacman -Sy)</span>
-<span class="c-p">$ </span>pacseek <span class="c-f">--refresh</span></pre></div>
+<span class="c-p">$ </span>pakmap <span class="c-f">--refresh</span></pre></div>
       </div>
     </div>
   </div>
@@ -605,14 +605,14 @@
       <h2>Make it yours.<br/>No recompile.</h2>
       <p class="sub">Every field is optional, and changes apply the next time you launch. Generate a starter file, then tweak away.</p>
       <ul class="checks">
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><code>pacseek --init-config</code> writes an example to <code>~/.config/pacseek/config.toml</code></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><code>pakmap --init-config</code> writes an example to <code>~/.config/pakmap/config.toml</code></span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><code>--show-config</code> prints the active path, and <code>--config PATH</code> overrides it</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span>A <code>./pacseek.toml</code> in the current folder overrides the global config</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span>A <code>./pakmap.toml</code> in the current folder overrides the global config</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span>Themes, borders, popup sizes, debounce, timeouts, remove flags</span></li>
       </ul>
     </div>
     <div class="code reveal">
-      <div class="code-head"><span>~/.config/pacseek/config.toml</span><button class="copy" data-copy="pacseek --init-config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy init</span></button></div>
+      <div class="code-head"><span>~/.config/pakmap/config.toml</span><button class="copy" data-copy="pakmap --init-config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy init</span></button></div>
 <pre><span class="c-h">[search]</span>
 <span class="c-k">limit</span>        = <span class="c-n">50</span>
 <span class="c-k">source</span>       = <span class="c-s">"all"</span>        <span class="c-c"># aur | repo | all</span>
@@ -661,40 +661,40 @@
         <button data-tab="manual">Manual</button>
       </div>
       <div class="panel on" data-group="install" data-panel="auto">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
-cd pacseek
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pakmap
+cd pakmap
 ./install.sh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
-<span class="c-p">$ </span>cd pacseek
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pakmap
+<span class="c-p">$ </span>cd pakmap
 <span class="c-p">$ </span>./install.sh            <span class="c-c"># deps + release build + /usr/local/bin</span>
 <span class="c-p">$ </span>./install.sh <span class="c-f">--help</span>     <span class="c-c"># --prefix / --yes / --no-sync</span></pre></div>
       </div>
       <div class="panel" data-group="install" data-panel="user">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
-cd pacseek
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pakmap
+cd pakmap
 ./install.sh --user"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
-<span class="c-p">$ </span>cd pacseek
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pakmap
+<span class="c-p">$ </span>cd pakmap
 <span class="c-p">$ </span>./install.sh <span class="c-f">--user</span>     <span class="c-c"># → ~/.cargo/bin (make sure it's on PATH)</span></pre></div>
       </div>
       <div class="panel" data-group="install" data-panel="cargo">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
-cd pacseek
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pakmap
+cd pakmap
 cargo install --path . --force"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
-<span class="c-p">$ </span>cd pacseek
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pakmap
+<span class="c-p">$ </span>cd pakmap
 <span class="c-p">$ </span>cargo install <span class="c-f">--path</span> . <span class="c-f">--force</span>   <span class="c-c"># or: make install</span></pre></div>
       </div>
       <div class="panel" data-group="install" data-panel="manual">
-        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pacseek
-cd pacseek
+        <div class="code"><div class="code-head"><span>bash</span><button class="copy" data-copy="git clone https://github.com/kenjaku-dev/pakmap
+cd pakmap
 cargo build --release
-sudo install -Dm755 target/release/pacseek /usr/local/bin/pacseek
+sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap
 sudo pacman -Sy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div>
-<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pacseek
-<span class="c-p">$ </span>cd pacseek
+<pre><span class="c-p">$ </span>git clone https://github.com/kenjaku-dev/pakmap
+<span class="c-p">$ </span>cd pakmap
 <span class="c-p">$ </span>cargo build <span class="c-f">--release</span>      <span class="c-c"># ~5.1M stripped</span>
-<span class="c-p">$ </span>sudo install <span class="c-f">-Dm755</span> target/release/pacseek /usr/local/bin/pacseek
+<span class="c-p">$ </span>sudo install <span class="c-f">-Dm755</span> target/release/pakmap /usr/local/bin/pakmap
 <span class="c-p">$ </span>sudo pacman <span class="c-f">-Sy</span>            <span class="c-c"># sync DB before first repo search</span></pre></div>
       </div>
     </div>
@@ -709,8 +709,8 @@ sudo pacman -Sy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
       <h2>Stop juggling <span class="grad">pacman -Ss</span> and the AUR website.</h2>
       <p class="sub">One binary, one search bar, one keystroke to install. Free and open source under the MIT license.</p>
       <div class="hero-ctas">
-        <a class="btn btn-primary" href="#install">Get pacseek</a>
-        <a class="btn btn-ghost" href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">
+        <a class="btn btn-primary" href="#install">Get pakmap</a>
+        <a class="btn btn-ghost" href="https://github.com/kenjaku-dev/pakmap" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
           Star on GitHub
         </a>
@@ -724,9 +724,9 @@ sudo pacman -Sy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
   <div class="wrap foot-in">
     <div>© 2026 achraf · MIT License · Built with Rust + ratatui. Not affiliated with Arch Linux or Artix.</div>
     <nav>
-      <a href="https://github.com/kenjaku-dev/pacseek" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://github.com/kenjaku-dev/pacseek/issues" target="_blank" rel="noopener">Issues</a>
-      <a href="https://github.com/kenjaku-dev/pacseek/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/kenjaku-dev/pakmap" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/kenjaku-dev/pakmap/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/kenjaku-dev/pakmap/releases" target="_blank" rel="noopener">Releases</a>
     </nav>
   </div>
 </footer>
@@ -782,7 +782,7 @@ document.querySelectorAll('.tabs').forEach(tabs => {
 });
 
 /* ---------- GitHub stars ---------- */
-fetch('https://api.github.com/repos/kenjaku-dev/pacseek')
+fetch('https://api.github.com/repos/kenjaku-dev/pakmap')
   .then(r => r.ok ? r.json() : null)
   .then(j => {
     if (!j || typeof j.stargazers_count !== 'number') return;
@@ -948,7 +948,7 @@ fetch('https://api.github.com/repos/kenjaku-dev/pacseek')
       return;
     }
     const body = pkg.r === 'aur'
-      ? `Install <b>aur/${esc(pkg.n)}</b> ${esc(pkg.v)} from the AUR?\n\n  <span class="cmd">git clone https://aur.archlinux.org/${esc(pkg.n)}.git</span>\n  <span class="cmd">makepkg -si</span>   <span class="warn">(PKGBUILD preview first · never as root)</span>\n  build dir: ~/.cache/pacseek/${esc(pkg.n)}`
+      ? `Install <b>aur/${esc(pkg.n)}</b> ${esc(pkg.v)} from the AUR?\n\n  <span class="cmd">git clone https://aur.archlinux.org/${esc(pkg.n)}.git</span>\n  <span class="cmd">makepkg -si</span>   <span class="warn">(PKGBUILD preview first · never as root)</span>\n  build dir: ~/.cache/pakmap/${esc(pkg.n)}`
       : `Install <b>${esc(pkg.r)}/${esc(pkg.n)}</b> ${esc(pkg.v)}?\n\n  <span class="cmd">sudo pacman -S ${esc(pkg.n)}</span>`;
     S.popup = { type:'confirm', title:'Confirm install', body, action:'install', pkg };
   }
@@ -1018,7 +1018,7 @@ fetch('https://api.github.com/repos/kenjaku-dev/pacseek')
         render(); return true;
       }
       if (key === 'r' || key === 'R') { confirmRefresh(); render(); return true; }
-      if (key === 'q') { S.quit = true; S.popup = { type:'msg', title:'pacseek', lines:['Terminal restored ✓  (alternate screen left)', '', 'Just a demo, so press any key to relaunch.'], done:true }; render(); return true; }
+      if (key === 'q') { S.quit = true; S.popup = { type:'msg', title:'pakmap', lines:['Terminal restored ✓  (alternate screen left)', '', 'Just a demo, so press any key to relaunch.'], done:true }; render(); return true; }
       if (key === '/') { S.focus = 'input'; render(); return true; }
       if (key === 'Backspace') { S.focus = 'input'; }
       else if (key.length === 1) { S.focus = 'input'; }

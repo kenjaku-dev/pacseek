@@ -94,7 +94,7 @@ export function TerminalDemo() {
   return (
     <div
       role="img"
-      aria-label="pacseek terminal demo: searching for firefox in official repos and the AUR"
+      aria-label="pakmap terminal demo: searching for firefox in official repos and the AUR"
       className="w-full overflow-hidden rounded-[11px] bg-card"
     >
       <div className="flex items-center gap-2 border-b border-border/70 bg-muted/60 px-3 py-2">
@@ -102,7 +102,7 @@ export function TerminalDemo() {
         <span className="h-2.5 w-2.5 rounded-full bg-yellow-500/70" aria-hidden="true" />
         <span className="h-2.5 w-2.5 rounded-full bg-accent/70" aria-hidden="true" />
         <span className="ml-2 truncate text-[11px] text-muted-foreground">
-          pacseek — Search / Installed
+          pakmap — Search / Installed
         </span>
       </div>
 

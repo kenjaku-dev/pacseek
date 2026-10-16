@@ -1,4 +1,4 @@
-# pacseek — butter Makefile
+# pakmap — butter Makefile
 .PHONY: help build release install test fmt clippy clean run
 
 help:  ## Show this help
@@ -9,19 +9,19 @@ build: ## Debug build
 
 release: ## Optimized release build (z + lto + strip)
 	cargo build --release
-	@ls -lh target/release/pacseek
+	@ls -lh target/release/pakmap
 
 install: release ## Install to ~/.cargo/bin and /usr/local/bin (if sudo)
 	cargo install --path . --force
-	@echo "Installed to ~/.cargo/bin/pacseek"
-	@which pacseek && pacseek --version || true
+	@echo "Installed to ~/.cargo/bin/pakmap"
+	@which pakmap && pakmap --version || true
 
 test: ## Run all checks + live search smoke test
 	cargo fmt --check
 	cargo clippy -- -D warnings
 	cargo test 2>&1 | head -n 50
-	./target/debug/pacseek neovim --limit 2 --json | head -n 20
-	./target/debug/pacseek firefox --source repo --limit 2
+	./target/debug/pakmap neovim --limit 2 --json | head -n 20
+	./target/debug/pakmap firefox --source repo --limit 2
 
 fmt: ## Format code
 	cargo fmt

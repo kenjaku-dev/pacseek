@@ -248,7 +248,7 @@ fn check_aur_updates_blocking_live(cfg: &crate::config::Config) -> Vec<PkgUpdate
     }
     let timeout = std::time::Duration::from_secs(cfg.search.timeout_secs.max(1));
     let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("pacseek/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("pakmap/{}", env!("CARGO_PKG_VERSION")))
         .timeout(timeout)
         .build();
     let Ok(client) = client else {
@@ -343,7 +343,7 @@ mod tests {
         invalidate_aur_memo();
         // Cached wrapper works and second call hits the memo (same content).
         // Live network: hermetic on content equality, skip fully offline.
-        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+        if std::env::var("PAKMAP_SKIP_LIVE").is_ok() {
             return;
         }
         let cfg = crate::config::Config::default();

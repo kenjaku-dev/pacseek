@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'pacseek-landing/**'
+      - 'pakmap-landing/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -24,19 +24,19 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: pacseek-landing
+        working-directory: pakmap-landing
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: pacseek-landing/package.json
+          package_json_file: pakmap-landing/package.json
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: pacseek-landing/pnpm-lock.yaml
+          cache-dependency-path: pakmap-landing/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -49,13 +49,13 @@ jobs:
       - name: Build static export
         run: pnpm build
         env:
-          # Project Pages: https://<user>.github.io/pacseek/
+          # Project Pages: https://<user>.github.io/pakmap/
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: pacseek-landing/out
+          path: pakmap-landing/out
 
   deploy:
     name: Deploy GitHub Pages

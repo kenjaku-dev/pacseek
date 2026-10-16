@@ -79,21 +79,21 @@ fn garbage_flatpak_is_failopen_empty() {
     // Own the memos: sibling tests share this process, so invalidate first —
     // otherwise a memo filled by another test would serve this one and the
     // shim would never execute (guard serializes, so no race).
-    pacseek::sources::invalidate_flatpak_memo();
-    pacseek::sources::invalidate_flatpak_list_memo();
-    assert!(pacseek::sources::has_flatpak());
-    let cfg = pacseek::config::Config::default();
+    pakmap::sources::invalidate_flatpak_memo();
+    pakmap::sources::invalidate_flatpak_list_memo();
+    assert!(pakmap::sources::has_flatpak());
+    let cfg = pakmap::config::Config::default();
     assert!(
-        pacseek::sources::list_installed()
+        pakmap::sources::list_installed()
             .unwrap_or_default()
             .is_empty()
     );
     assert!(
-        pacseek::sources::search_flatpak_with_config("firefox", 10, false, &cfg)
+        pakmap::sources::search_flatpak_with_config("firefox", 10, false, &cfg)
             .unwrap_or_default()
             .is_empty()
     );
-    assert!(pacseek::sources::check_flatpak_updates_with_config(&cfg).is_empty());
+    assert!(pakmap::sources::check_flatpak_updates_with_config(&cfg).is_empty());
 }
 
 #[test]
@@ -103,16 +103,16 @@ fn exit1_flatpak_is_failopen_empty() {
     // Own the memos: sibling tests share this process, so invalidate first —
     // otherwise a memo filled by another test would serve this one and the
     // shim would never execute (guard serializes, so no race).
-    pacseek::sources::invalidate_flatpak_memo();
-    pacseek::sources::invalidate_flatpak_list_memo();
-    assert!(pacseek::sources::has_flatpak());
-    let cfg = pacseek::config::Config::default();
+    pakmap::sources::invalidate_flatpak_memo();
+    pakmap::sources::invalidate_flatpak_list_memo();
+    assert!(pakmap::sources::has_flatpak());
+    let cfg = pakmap::config::Config::default();
     assert!(
-        pacseek::sources::list_installed()
+        pakmap::sources::list_installed()
             .unwrap_or_default()
             .is_empty()
     );
-    assert!(pacseek::sources::check_flatpak_updates_with_config(&cfg).is_empty());
+    assert!(pakmap::sources::check_flatpak_updates_with_config(&cfg).is_empty());
 }
 
 #[test]
@@ -125,12 +125,12 @@ fn slow_remote_info_is_bounded() {
     );
     let dir = shim_dir("flatpak", &body);
     let _guard = PathGuard::prepend(dir.path());
-    pacseek::sources::invalidate_flatpak_memo();
-    pacseek::sources::invalidate_flatpak_list_memo();
-    let mut cfg = pacseek::config::Config::default();
+    pakmap::sources::invalidate_flatpak_memo();
+    pakmap::sources::invalidate_flatpak_list_memo();
+    let mut cfg = pakmap::config::Config::default();
     cfg.search.timeout_secs = 2;
     let start = std::time::Instant::now();
-    let updates = pacseek::sources::check_flatpak_updates_with_config(&cfg);
+    let updates = pakmap::sources::check_flatpak_updates_with_config(&cfg);
     let elapsed = start.elapsed();
     assert!(updates.is_empty());
     assert!(
@@ -146,6 +146,6 @@ fn garbage_paccache_preview_is_zero() {
         "#!/bin/sh\necho 'total garbage output'\nexit 0\n",
     );
     let _guard = PathGuard::prepend(dir.path());
-    let preview = pacseek::install::clean::preview_clean(2).unwrap();
+    let preview = pakmap::install::clean::preview_clean(2).unwrap();
     assert_eq!((preview.files, preview.bytes), (0, 0));
 }

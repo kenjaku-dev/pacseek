@@ -26,7 +26,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             })
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true })
-            .block(Block::bordered().title(" pacseek "));
+            .block(Block::bordered().title(" pakmap "));
         f.render_widget(msg, area);
         return;
     }

@@ -1,7 +1,7 @@
-# pacseek — Project Context
+# pakmap — Project Context
 
 ## Overview
-Fast **AUR + Official Repo + Flatpak** search + TUI install/remove/upgrade/clean for Arch/Artix, Rust `0.6.0`, at `/home/achraf/projects/pacseek` (`pacseek` binary, `MIT`).
+Fast **AUR + Official Repo + Flatpak** search + TUI install/remove/upgrade/clean for Arch/Artix, Rust `0.6.0`, at `/home/achraf/projects/pakmap` (`pakmap` binary, `MIT`).
 One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc/v5` + `flatpak --json` + `ratatui` TUI matching drawing: top `firefox` search bar → results list → `Enter` install / `i` info+deps, `Tab` cycles Search→Installed→Updates, `c` cleans cache, `U` upgrades all (pacman+flatpak).
 
 ```
@@ -18,8 +18,8 @@ One binary: `libalpm` local DB (no network) + AUR `https://aur.archlinux.org/rpc
 ## Tech Stack
 - `rust 1.85+` (MSRV 1.88 for `ratatui 0.30`), `edition 2024`, `tokio` (`rt-multi-thread` + `macros`), `reqwest 0.12` (json+rustls+blocking via OnceLock), `alpm 5` + `pacmanconf 3`, `clap 4.5` derive, `serde`/`serde_json`/`toml 0.8`, `anyhow`/`thiserror`, `colored 2`, `indicatif 0.17`, `tracing 0.1`, `regex 1`, `url 2`
 - TUI: `ratatui 0.30` `crossterm 0.29` `tui-input 0.15` `color-eyre 0.6` `dirs 5` `nix 0.29` `unicode-width 0.2` `signal-hook 0.3`
-- Config: `~/.config/pacseek/config.toml` + `./pacseek.toml` project-local, `[search]/[tui]/[theme]/[behavior]` via `crate::config::Config` (serde TOML, defaults < file < env < CLI)
-- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.4M** `target/release/pacseek`, `dev` `opt-level 0`
+- Config: `~/.config/pakmap/config.toml` + `./pakmap.toml` project-local, `[search]/[tui]/[theme]/[behavior]` via `crate::config::Config` (serde TOML, defaults < file < env < CLI)
+- Profile `release` `opt-level=z lto codegen-units=1 strip panic=unwind` **5.4M** `target/release/pakmap`, `dev` `opt-level 0`
 
 ## Architecture
 ```
@@ -27,7 +27,7 @@ src/
   main.rs       # IsTerminal, --tui/--no-tui/--json, Config::load + CLI merge (defaults < file < env < CLI), tokio::join! parallel repo+aur, spinner from config
   lib.rs        # pub mod cli/config/install/model/output/search/tui
   cli.rs        # Clap derive, query:Option<String>, Source (All/Aur/Repo), AurBy (name/name-desc...), limit 50, regex, installed_only, bottom_up, verbose, no_color, no_tui, tui, --config/--init-config/--show-config
-  config.rs     # Config {search,tui,theme,behavior} serde TOML, XDG ~/.config/pacseek/config.toml + ./pacseek.toml, example_toml(), parse_style/border_type, aur_rpc/cache_dir helpers, 9 tests
+  config.rs     # Config {search,tui,theme,behavior} serde TOML, XDG ~/.config/pakmap/config.toml + ./pakmap.toml, example_toml(), parse_style/border_type, aur_rpc/cache_dir helpers, 9 tests
   model.rs      # Package {name, version, description, repo, arch, url, installed, votes/popularity/out_of_date/maintainer/num_votes/last_modified} PartialEq
   search/
     aur.rs      # RPC v5 async + blocking, config aur_rpc + timeout (OnceLock vs per-call), NaN-safe sort (filter finite), regex client-side
@@ -63,8 +63,8 @@ tests/
 sudo pacman -Sy
 cargo fmt --check; cargo clippy -- -D warnings -- -W clippy::unwrap_used # 0 warnings
 cargo test # 148/148 (lib 108, aur_nan 2, chaos 4, integration 17, tui_snapshot 17) + doc 0
-pacseek --init-config          # → ~/.config/pacseek/config.toml (edit colors/layout/timeouts)
-pacseek --show-config          # prints XDG + project-local paths
+pakmap --init-config          # → ~/.config/pakmap/config.toml (edit colors/layout/timeouts)
+pakmap --show-config          # prints XDG + project-local paths
 cargo run -- firefox --no-tui --limit 2 --no-color
 cargo run -- --tui             # TTY: type firefox → Enter, ↑↓, Enter→confirm Y, i→info+deps, Tab→Installed (o orphans, c clean), Tab→Updates (U upgrade-all pacman+flatpak), q→quit
 cargo run -- firefox --source flatpak --limit 3
@@ -75,12 +75,12 @@ cargo run -- --clean --dry-run # preview reclaimable cache (paccache -k2) + flat
 cargo run -- --config ./my.toml firefox --no-tui
 NO_COLOR=1 cargo run -- --tui # plain
 cargo build --release # 5.4M stripped
-cargo install --path . --force # ~/.cargo/bin/pacseek 0.6.0
+cargo install --path . --force # ~/.cargo/bin/pakmap 0.6.0
 ```
 
 ## Flows
-- **CLI:** `pacseek firefox` → `spawn_blocking search_repo` + `search_aur` `tokio::join!` → `print_packages` repo first
-- **TUI:** `pacseek` or `pacseek --tui firefox` → `App::new_with_cli` (limit/source/by/regex/installed_only/no_color) → `trigger_search` mpsc+thread parallel → `poll_search_results` dedup `search_id` → `List` → `Enter` → `Confirm` → `suspend_and_run` → `install_*` → `last_query.clear()` → `trigger_search` refresh
+- **CLI:** `pakmap firefox` → `spawn_blocking search_repo` + `search_aur` `tokio::join!` → `print_packages` repo first
+- **TUI:** `pakmap` or `pakmap --tui firefox` → `App::new_with_cli` (limit/source/by/regex/installed_only/no_color) → `trigger_search` mpsc+thread parallel → `poll_search_results` dedup `search_id` → `List` → `Enter` → `Confirm` → `suspend_and_run` → `install_*` → `last_query.clear()` → `trigger_search` refresh
 
 ## Phases — All Done
 - **A** stability: NaN-safe, unicode-width, unwrap_or_else, panic unwind, signal-hook, try_restore — `68205d6`
@@ -103,7 +103,7 @@ cargo install --path . --force # ~/.cargo/bin/pacseek 0.6.0
 - **R** perf P4 (cache): `list_installed_cached()` 60s inventory memo + `invalidate_flatpak_list_memo()` paired at all 6 updates-memo invalidate sites (refresh excluded — pacman -Sy never changes flatpak inventory); `with_config`/trait/`--stats` all serve the cached list; verified live that `flatpak install` on an installed app is a safe no-op (exit 0), so Search-row routing needs no change — 143 tests
 - **S** perf P5 (chaos+gates): `tests/chaos_shims.rs` — fake flatpak/paccache on PATH under a mutex+restore guard (garbage/exit-1/hung remote-info all fail-open; slow test invalidates memos first so the bound is genuinely exercised, ~4s); caught a real flaw while writing it (shared updates memo served sibling tests); `[lints.clippy] unwrap_used/expect_used="deny"` in manifest + cfg_attr allow for lib tests + file allows for integration crates; CI now runs `--lib` and `--test chaos_shims`; measured delta — `--updates`/`--stats` walls track slowest backend not the sum (e.g. 3.2s vs 4.3s serial, 5.6s vs 8.9s serial on a loaded box; absolute ms vary with cache/network warmth) — 147 tests
 - **T** CI fix: pure-Rust `process::has_tool()` PATH scan (+ test) replaces all 4 `Command::new("which")` probes (clean/flatpak/aur/diff) — the Arch CI container lacks a `which` binary, so every probe false-negatived and all chaos asserts failed there while green locally; proven by running the chaos binary under `env -i PATH=/tmp/minbin` (old spawn → exit 127, new scan → 4/4 pass); integration presence helpers now use the real probes — 148 tests
-- **U** current CI green: unit step failed twice fast (~10s) after `--lib` first ran lib tests in CI; made the "offline" step honestly offline (`PACSEEK_SKIP_LIVE=1` + news-fetch guard) and split lib/snapshot steps with a diagnose step that surfaces failing test names as annotations; `81d3ccd` fully green (fmt/clippy/unit/integration/release) — whether the middle failure was live-flake or env, the step is now hermetic and self-diagnosing
+- **U** current CI green: unit step failed twice fast (~10s) after `--lib` first ran lib tests in CI; made the "offline" step honestly offline (`PAKMAP_SKIP_LIVE=1` + news-fetch guard) and split lib/snapshot steps with a diagnose step that surfaces failing test names as annotations; `81d3ccd` fully green (fmt/clippy/unit/integration/release) — whether the middle failure was live-flake or env, the step is now hermetic and self-diagnosing
 
 ## Repo
 - `main` (synced with `origin/main`); history includes `7d1ebd9` search, `772e410` TUI, `68205d6` A, `cc0c62d` B, `321b77d` C, `39523b3` D, `bc15b9f` E, `31719f5` v0.2.0 (older commits; `main` now also carries landing + 0.3.0 work)
