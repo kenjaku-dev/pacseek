@@ -73,6 +73,8 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Unit tests (offline)
+        env:
+          PACSEEK_SKIP_LIVE: "1"
         run: cargo test --locked --lib --test aur_nan --test tui_snapshot
 
       - name: Sync pacman DB + integration tests

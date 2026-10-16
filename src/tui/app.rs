@@ -1859,6 +1859,11 @@ mod tests {
 
     #[test]
     fn u_in_updates_opens_confirm_upgrade() {
+        // `U` fetches Arch news live for the inline warning; skip the fetch
+        // when PACSEEK_SKIP_LIVE=1 (popup shape is snapshot-covered).
+        if std::env::var("PACSEEK_SKIP_LIVE").is_ok() {
+            return;
+        }
         let mut app = App::new("".into());
         app.mode = Mode::Updates;
         app.focus = Focus::List;
