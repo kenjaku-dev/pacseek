@@ -162,11 +162,7 @@ pub fn pager_cmd(cfg: &crate::config::Config) -> (&'static str, Vec<String>) {
 }
 
 fn which(name: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::process::has_tool(name)
 }
 
 #[cfg(test)]

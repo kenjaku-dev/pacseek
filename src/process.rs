@@ -27,6 +27,30 @@ pub const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 /// spin cost (20 wakeups/sec worst case, only while a child runs).
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// True when `name` resolves to an executable file on PATH.
+/// Pure-Rust `which`: never shells out to an external `which` binary, which
+/// is absent from minimal containers (and would make every probe a false
+/// negative there). Rejects empty names, paths and NULs; never panics.
+pub fn has_tool(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() || name.contains('/') || name.contains('\0') {
+        return false;
+    }
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| is_executable_file(&dir.join(name)))
+}
+
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.is_file()
+        && path
+            .metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+}
+
 /// Wait up to `timeout`, killing + reaping the child on expiry (no zombies,
 /// no orphaned writers). `Some(status)` also covers immediate spawn errors
 /// as `None` via the caller.
@@ -146,5 +170,15 @@ mod tests {
     fn inherit_true_is_some() {
         let st = status_inherit_bounded("true", &[], Duration::from_secs(5)).unwrap();
         assert!(st.success());
+    }
+
+    #[test]
+    fn has_tool_finds_shell_rejects_garbage() {
+        assert!(has_tool("sh"));
+        assert!(!has_tool("definitely-not-a-binary-xyz"));
+        assert!(!has_tool(""));
+        assert!(!has_tool("   "));
+        assert!(!has_tool("a/b"));
+        assert!(!has_tool("foo\0bar"));
     }
 }

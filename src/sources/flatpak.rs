@@ -100,13 +100,9 @@ impl SourceBackend for FlatpakBackend {
     }
 }
 
-/// `which flatpak` probe. No output parsing, exit status only.
+/// `flatpak` on PATH probe (pure-Rust, no `which` binary needed).
 pub fn has_flatpak() -> bool {
-    Command::new("which")
-        .arg("flatpak")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::process::has_tool("flatpak")
 }
 
 /// True when `remote` appears in `flatpak remote-list --columns=name`.

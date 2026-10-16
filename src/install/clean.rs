@@ -27,11 +27,7 @@ pub fn clean_command_args(keep: u32, dry_run: bool) -> Vec<String> {
 }
 
 fn has_tool(name: &str) -> bool {
-    Command::new("which")
-        .arg(name)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::process::has_tool(name)
 }
 
 pub fn has_paccache() -> bool {

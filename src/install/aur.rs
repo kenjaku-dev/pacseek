@@ -17,11 +17,7 @@ fn has_tool(name: &'static str) -> bool {
     {
         return found;
     }
-    let found = Command::new("which")
-        .arg(name)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let found = crate::process::has_tool(name);
     if let Ok(mut guard) = cache.lock() {
         guard.insert(name, found);
     }

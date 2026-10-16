@@ -166,11 +166,7 @@ fn readonly_refuses_mutating_ops() {
 }
 
 fn paccache_present() -> bool {
-    std::process::Command::new("which")
-        .arg("paccache")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    pacseek::install::clean::has_paccache()
 }
 
 #[test]
@@ -214,11 +210,7 @@ fn readonly_refuses_clean() {
 }
 
 fn flatpak_present() -> bool {
-    std::process::Command::new("which")
-        .arg("flatpak")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    pacseek::sources::has_flatpak()
 }
 
 #[test]
