@@ -166,7 +166,7 @@ export function TerminalDemo() {
             ))}
 
             {phase === "typing" && (
-              <p className="px-1 text-muted-foreground/70">Type a query, press Enter…</p>
+              <p className="px-1 text-muted-foreground">Type a query, press Enter…</p>
             )}
           </div>
         </div>

@@ -8,6 +8,7 @@
 
 **Project:** pakmap
 **Generated:** 2026-09-21 22:27:38
+**Updated:** 2026-10-16 — palette table synced with the shipped tokens in `pakmap-landing/src/app/globals.css`
 **Category:** Developer Tool / IDE
 **Design Dials:** Variance 7/10 (Balanced / Modern) | Motion 6/10 (Standard) | Density 4/10 (Standard)
 
@@ -17,26 +18,28 @@
 
 ### Color Palette
 
+Palette below is the *implemented* token set (darker OLED than the initial generation).
+
 | Role | Hex | CSS Variable |
 |------|-----|--------------|
 | Primary | `#1E293B` | `--color-primary` |
-| On Primary | `#FFFFFF` | `--color-on-primary` |
+| On Primary | `#F1F5F9` | *(unused in CSS; text-on-dark via `--color-foreground`)* |
 | Secondary | `#334155` | `--color-secondary` |
-| On Secondary | `#FFFFFF` | `--color-on-secondary` |
 | Accent/CTA | `#22C55E` | `--color-accent` |
-| On Accent/CTA | `#0F172A` | `--color-on-accent` |
-| Background | `#0F172A` | `--color-background` |
-| Foreground | `#F8FAFC` | `--color-foreground` |
-| Card | `#1B2336` | `--color-card` |
-| Card Foreground | `#F8FAFC` | `--color-card-foreground` |
-| Muted | `#272F42` | `--color-muted` |
+| On Accent/CTA | `#07131F` | `--color-on-accent` |
+| Accent Secondary | `#38BDF8` | `--color-accent-secondary` |
+| Accent Tertiary | `#A78BFA` | `--color-accent-tertiary` |
+| Background | `#080D17` | `--color-background` |
+| Foreground | `#F1F5F9` | `--color-foreground` |
+| Card | `#0F1728` | `--color-card` |
+| Card Foreground | `#F1F5F9` | (inherits `--color-foreground`) |
+| Muted | `#162033` | `--color-muted` |
 | Muted Foreground | `#94A3B8` | `--color-muted-foreground` |
-| Border | `#475569` | `--color-border` |
+| Border | `#2A3A55` | `--color-border` |
 | Destructive | `#EF4444` | `--color-destructive` |
-| On Destructive | `#000000` | `--color-on-destructive` |
-| Ring | `#FFFFFF` | `--color-ring` |
+| Ring | `#22C55E` | (`:focus-visible` outline in `globals.css`) |
 
-**Color Notes:** Code dark + run green
+**Color Notes:** Code dark + run green. Do not apply opacity modifiers below `/90` to `--color-muted-foreground` for informational text — it fails WCAG 1.4.3 on `--color-card`/`--color-background`.
 
 ### Typography
 

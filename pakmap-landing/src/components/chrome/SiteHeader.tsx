@@ -40,9 +40,9 @@ export function SiteHeader() {
             <div className="flex items-center gap-2">
               <span
                 className="hidden text-xs text-muted-foreground md:inline"
-                aria-label={`Version ${SITE.version}`}
               >
-                v{SITE.version}
+                <span className="sr-only">Version {SITE.version}</span>
+                <span aria-hidden="true">v{SITE.version}</span>
               </span>
               <a
                 href="#install"

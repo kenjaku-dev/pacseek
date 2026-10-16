@@ -67,9 +67,9 @@ export function Hero() {
             transition={{ duration: 0.45, ease, delay: 0.12 }}
             className="mt-5 max-w-[42ch] text-sm leading-relaxed text-muted-foreground sm:text-base"
           >
-            One binary for <span className="text-foreground">pacman -Ss</span> and
-            AUR RPC v5. Search in parallel, preview the PKGBUILD, install or
-            remove — without leaving your terminal.
+            One binary for <span className="text-foreground">pacman -Ss</span>,
+            AUR RPC v5, and flatpak search. Search in parallel, preview the
+            PKGBUILD, install or remove — without leaving your terminal.
           </motion.p>
 
           <motion.div

@@ -4,9 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "predev": "node scripts/sync-version.mjs",
     "build": "next build",
+    "prebuild": "node scripts/sync-version.mjs",
     "start": "next start",
     "lint": "eslint",
+    "sync-version": "node scripts/sync-version.mjs",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {

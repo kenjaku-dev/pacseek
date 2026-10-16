@@ -8,6 +8,7 @@ import {
   Paintbrush,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
 } from "lucide-react";
 import { Section } from "./ui/Section";
 import { useSpotlight } from "./ui/useSpotlight";
@@ -53,6 +54,13 @@ const FEATURES = [
     title: "Script-friendly flags",
     description:
       "--source, --by, --installed-only, --bottom-up, --no-tui, --remove PKG.",
+    wide: false,
+  },
+  {
+    icon: Smartphone,
+    title: "Flatpak support",
+    description:
+      "--source flatpak searches Flathub; install and remove app-IDs without sudo. --clean also drops unused runtimes.",
     wide: false,
   },
 ] as const;

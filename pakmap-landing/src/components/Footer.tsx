@@ -16,10 +16,11 @@ export function Footer() {
               <Logo />
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Fast package search for Arch and Artix — official repos and the AUR
-              in one Rust binary, with a terminal UI to install and remove.
+              Fast package search for Arch and Artix — official repos, the AUR,
+              and Flatpak in one Rust binary, with a terminal UI to install and
+              remove.
             </p>
-            <p className="mt-4 text-xs text-muted-foreground/80">
+            <p className="mt-4 text-xs text-muted-foreground">
               Built with Rust, ratatui, and libalpm.
             </p>
           </div>

@@ -1,6 +1,10 @@
+import { PAKMAP_VERSION } from "./version";
+
 export const SITE = {
   name: "pakmap",
-  version: "0.3.0",
+  // Single source of truth: ../Cargo.toml → src/lib/version.ts (generated).
+  // Regenerate with `pnpm sync-version`; commit the file with version bumps.
+  version: PAKMAP_VERSION,
   license: "MIT",
   platforms: "Arch / Artix",
   tagline: "Search Arch packages at terminal speed.",

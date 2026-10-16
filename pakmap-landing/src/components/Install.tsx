@@ -23,7 +23,7 @@ pakmap --init-config     # write config.toml`,
 ] as const;
 
 const DEPS =
-  "Requires pacman 5.1+ (libalpm), pacman-contrib, git, base-devel for AUR builds, Rust 1.85+.";
+  "Requires pacman 5.1+ (libalpm), pacman-contrib, git, base-devel for AUR builds, Rust 1.88+. Flatpak (optional) enables --source flatpak.";
 
 function CommandLine({ line }: { line: string }) {
   const hashIndex = line.indexOf("#");
@@ -37,7 +37,7 @@ function CommandLine({ line }: { line: string }) {
       </span>
       <span className="text-foreground">{command}</span>
       {comment && (
-        <span className="text-muted-foreground/70">{comment}</span>
+        <span className="text-muted-foreground">{comment}</span>
       )}
     </span>
   );
