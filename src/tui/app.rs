@@ -1511,6 +1511,9 @@ impl App {
                 let mut msg = format!("Cleaned {files} files ({size})");
                 if fp {
                     msg.push_str(" + flatpak unused");
+                    // P5 audit: the unused-runtime drop changed the flatpak
+                    // inventory — the 60s list memo must not serve stale rows.
+                    crate::sources::invalidate_flatpak_list_memo();
                 }
                 self.status = msg.clone();
                 self.popup = Popup::Message(format!("✓ {msg}"));

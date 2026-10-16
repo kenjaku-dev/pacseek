@@ -25,7 +25,7 @@ Built with **best skills**: `ratatui 0.30` (tui-design ecosystem-rust, immediate
 - **TUI:** `pakmap --tui` or `pakmap` (no args, TTY) → tabs `Search` / `Installed` / `Updates` (`Tab` cycles) → search bar + virtualized `List` → `i` info+deps / `?` help popup → `Enter` confirm → `sudo pacman -S` (repo) or `git clone + makepkg -si` (AUR, PKGBUILD diff + preview, `namcap` if present, `~/.cache/pakmap`)
  - **Remover:** `Tab` → Installed mode (empty filter lists all, type to filter, `o` orphans-only `pacman -Qdt`) → `Enter`/`d`/`x` remove → confirm popup (`sudo pacman -Rs`, `pacman -Qi` preview) → `pakmap --remove <pkg>` for scripts (confirms on TTY; `PAKMAP_NOCONFIRM=1` bypasses)
  - **Updates:** `Tab` ×2 → Updates mode (repo `vercmp` + AUR RPC `/info` + flatpak `remote-info`, `[OOD]` badges) → `Enter` upgrade one, `U` upgrade all (`sudo pacman -Syu` + `flatpak update`, Arch-news guard) → `pakmap --updates` / `--upgrade` for scripts
- - **Flatpak:** `--source flatpak` search (`flatpak search --json`), install/remove/update without sudo, `--remove` auto-detects app-IDs, `--clean` also drops unused runtimes; disable via `[behavior] flatpak_enabled=false`
+ - **Flatpak:** `--source flatpak` search reads the **local appstream index directly** (`appstream.xml`, no `flatpak` spawn — ~150ms vs 3.4s) with bounded `flatpak search --json` as fail-open fallback; install/remove/update without sudo, `--remove` auto-detects app-IDs, `--clean` also drops unused runtimes; disable via `[behavior] flatpak_enabled=false`
  - **Orphans/stats:** `pakmap --orphans` (`-Qdt`), `pakmap --stats` (explicit/deps/orphans/updates/cache/flatpak) — all `--json` capable
  - **Refresh:** `F5`/`Ctrl+R` anywhere or `r` in list → confirm popup → `sudo pacman -Sy` → cache cleared + re-query → `pakmap --refresh` for scripts
  - Filters: `--source aur|repo|flatpak|all`, `--by name|name-desc|maintainer...`, `--limit N`, `--regex`, `--installed-only` (repo only), `--bottom-up`, `--json`, `--no-color`, `--no-tui`, `--remove PKG` (flatpak app-IDs auto-detected, no sudo), `--refresh`, `--updates` (repo+AUR+flatpak), `--orphans`, `--stats` (incl. flatpak apps/updates), `--upgrade` (pacman -Syu + flatpak update), `--clean [--keep N] [--dry-run]` (paccache + unused flatpak runtimes), `--readonly`
@@ -109,12 +109,12 @@ src/
   diff.rs        # PKGBUILD git diff + render_diff LCS + pager auto
   stats.rs       # explicit/deps/orphans/updates/cache + human_bytes
   search/
-    aur.rs       # RPC v5 async + blocking (TUI), sorts popularity, config aur_rpc + timeout
+    aur.rs       # RPC v5 async + blocking (TUI), sorts popularity, config aur_rpc + timeout; shared tuned clients (gzip, 5s connect bound, nodelay) + one-shot per-process connection warm-up
     repo.rs      # alpm 5 + pacmanconf, fallback pacman -Ss
   output.rs      # colored + json (CLI) + print_updates/print_orphans/print_stats, badges + Required-by
   tui/
     mod.rs       # run() try_init/try_restore, run_with_config, suspend_and_run handoff + flush/drain
-    app.rs       # Input (tui-input), ListState, Config stored, debounced/poll_ms from config, non-blocking mpsc, Search/Installed/Updates + readonly + orphans_only + U upgrade
+    app.rs       # Input (tui-input), ListState, Config stored, debounced/poll_ms from config, non-blocking mpsc with **staged per-backend results** (each backend paints on join, Done swaps atomically), Search/Installed/Updates + readonly + orphans_only + U upgrade
     ui.rs        # Layout vertical configurable, border_type + colors from theme, popups %, Clear hole-punch, 3 tabs + badges + deps + upgrade confirm
   install/
     repo.rs      # sudo pacman -S --needed (aur-helpers)
@@ -134,10 +134,25 @@ src/
 - `aur-guides`: ` Aurweb RPC` `https://aur.archlinux.org/rpc/v5/search/{q}?by=`, `makepkg -s`, `namcap`, `.SRCINFO`, HTTPS sources
 - Release `opt-level="z" lto codegen-units=1 strip`, `cargo fmt/clippy/audit`
 
+## Performance
+
+Measured `release` walls, steady state (see `context.md` for the full W-sprint record):
+
+| leg | before | after |
+|---|---|---|
+| flatpak search | 3.4–4.5 s | **~150 ms** (23×) |
+| AUR search | ~507 ms | **~320 ms** (gzip + tuned clients + warm pool) |
+| all-sources | ~600 ms–3.1 s | **~490 ms** (now bounded by the repo leg) |
+
+- Flatpak search reads `~/.local/share/flatpak/appstream/<remote>/<arch>/active/appstream.xml` (or the system install) directly and stops at the limit; `.gz`-only caches and oversized (>256MB) files fall back to the bounded `flatpak search` spawn.
+- The TUI paints each backend's block the moment it finishes (repo first, then aur/flatpak) instead of waiting for the slowest one.
+- Tests can pin the appstream lookup with `PAKMAP_FLATPAK_APPSTREAM_ROOT` (chaos fixtures); `PAKMAP_SKIP_LIVE=1` keeps all network warm-ups offline.
+
 ## Troubleshooting
 - **No repo results:** `sudo pacman -Sy` (`/var/lib/pacman/sync/*.db`)
 - **alpm init failed:** fallback `pacman -Ss`; check `pacman-conf` exists
 - **AUR timeout:** retry or `--source repo`; TUI shows `No results`
+- **Flatpak search empty (old flatpak / `.gz`-only cache):** falls back to bounded `flatpak search` automatically; `flatpak update` refreshes the index daily
 - **TUI not starting:** `pakmap --tui` needs TTY; in headless use `--no-tui`; panic restores via `color_eyre` hook
 - **AUR install as root:** blocked — run as user, `sudo` for pacman only
 
