@@ -67,18 +67,66 @@ fn shim_dir(name: &str, body: &str) -> tempfile::TempDir {
     dir
 }
 
+/// Full-isolation guard for the *search* fast path: fake `flatpak` shim on
+/// PATH (same mechanics as [`PathGuard`]) plus an appstream-root override
+/// (`PAKMAP_FLATPAK_APPSTREAM_ROOT` -> a tempdir), so search never consults
+/// the host's real user/system appstream caches. Both mutations live inside
+/// the same PATH_LOCK critical section; PATH and env restore on drop.
+struct IsolatedSearch {
+    _shim: tempfile::TempDir,
+    cacheroot: tempfile::TempDir,
+    original_path: Option<OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl IsolatedSearch {
+    fn new(shim_body: &str) -> Self {
+        let shim = shim_dir("flatpak", shim_body);
+        let cacheroot = tempfile::tempdir().unwrap();
+        let lock = PATH_LOCK.lock().unwrap();
+        let original = std::env::var_os("PATH");
+        let mut paths: Vec<std::path::PathBuf> = vec![shim.path().to_path_buf()];
+        if let Some(ref o) = original {
+            paths.extend(std::env::split_paths(o));
+        }
+        if !paths.iter().any(|p| p == std::path::Path::new("/usr/bin")) {
+            paths.push(std::path::PathBuf::from("/usr/bin"));
+        }
+        let joined = std::env::join_paths(paths).unwrap();
+        unsafe {
+            std::env::set_var("PATH", &joined);
+            std::env::set_var("PAKMAP_FLATPAK_APPSTREAM_ROOT", cacheroot.path());
+        }
+        Self {
+            _shim: shim,
+            cacheroot,
+            original_path: original,
+            _lock: lock,
+        }
+    }
+}
+
+impl Drop for IsolatedSearch {
+    fn drop(&mut self) {
+        unsafe {
+            match self.original_path.take() {
+                Some(o) => std::env::set_var("PATH", o),
+                None => std::env::remove_var("PATH"),
+            }
+            std::env::remove_var("PAKMAP_FLATPAK_APPSTREAM_ROOT");
+        }
+    }
+}
+
 const ONE_APP_JSON: &str = r#"[{"name":"ChaosApp","application_id":"org.chaos.App","version":"1.0","branch":"stable","arch":"x86_64","origin":"flathub","installation":"system"}]"#;
 
 #[test]
 fn garbage_flatpak_is_failopen_empty() {
-    let dir = shim_dir(
-        "flatpak",
-        "#!/bin/sh\necho 'this is not json at all'\nexit 0\n",
-    );
-    let _guard = PathGuard::prepend(dir.path());
-    // Own the memos: sibling tests share this process, so invalidate first —
-    // otherwise a memo filled by another test would serve this one and the
-    // shim would never execute (guard serializes, so no race).
+    // Garbage shim AND an empty appstream-root: both the list spawn path and
+    // the search fallback path die into fail-open empties, with no host
+    // cache involvement (the fast path is proven separately below).
+    let guard = IsolatedSearch::new("#!/bin/sh\necho 'this is not json at all'\nexit 0\n");
+    assert!(guard.cacheroot.path().is_dir());
     pakmap::sources::invalidate_flatpak_memo();
     pakmap::sources::invalidate_flatpak_list_memo();
     assert!(pakmap::sources::has_flatpak());
@@ -94,6 +142,49 @@ fn garbage_flatpak_is_failopen_empty() {
             .is_empty()
     );
     assert!(pakmap::sources::check_flatpak_updates_with_config(&cfg).is_empty());
+}
+
+const CHAOS_APPSTREAM: &str = r#"<components version="0.15" origin="flathub">
+  <component type="desktop">
+    <id>org.chaos.Cache</id>
+    <name>ChaosCache</name>
+    <summary>Direct app &amp; cache probe</summary>
+    <keywords><keyword>chaos</keyword></keywords>
+    <releases><release version="9.9"/></releases>
+  </component>
+</components>"#;
+
+#[test]
+fn appstream_cache_serves_search_without_spawning() {
+    // The shim answers JSON-garbage for EVERY call: only the appstream fast
+    // path could produce a hit, so a result here proves the direct-parse
+    // route end to end (fixture cache -> parser -> no flatpak spawn).
+    let guard = IsolatedSearch::new("#!/bin/sh\necho 'this is not json at all'\nexit 0\n");
+    let site = guard
+        .cacheroot
+        .path()
+        .join("appstream")
+        .join("flathub")
+        .join("x86_64")
+        .join("active");
+    std::fs::create_dir_all(&site).unwrap();
+    std::fs::write(site.join("appstream.xml"), CHAOS_APPSTREAM).unwrap();
+    let cfg = pakmap::config::Config::default();
+    let pkgs =
+        pakmap::sources::search_flatpak_with_config("chaos", 10, false, &cfg).unwrap_or_default();
+    assert_eq!(pkgs.len(), 1);
+    assert_eq!(pkgs[0].name, "org.chaos.Cache");
+    assert_eq!(pkgs[0].version, "9.9");
+    assert_eq!(pkgs[0].url.as_deref(), Some("flatpak:flathub"));
+    assert!(!pkgs[0].installed);
+    // ASCII case folding holds end to end, and the garbage shim is proven
+    // untouched by the empty-result regressions in the sibling test.
+    assert_eq!(
+        pakmap::sources::search_flatpak_with_config("CHAOS", 10, false, &cfg)
+            .unwrap_or_default()
+            .len(),
+        1
+    );
 }
 
 #[test]

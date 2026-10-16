@@ -519,11 +519,22 @@ pub fn search_flatpak_with_config(
     if !cfg.flatpak_enabled() || !has_flatpak() || query.trim().is_empty() {
         return Ok(vec![]);
     }
-    let timeout = Duration::from_secs(cfg.search.timeout_secs.max(1));
-    let Some(out) = run_flatpak(&["search", query.trim(), "--json"], timeout) else {
-        return Ok(vec![]);
+    let trimmed = query.trim();
+    // Perf W (fast path): the searched index is a local file —
+    // `<install>/appstream/<remote>/<arch>/active/appstream.xml` — so read it
+    // directly instead of paying flatpak's full index load on every search
+    // (~3.4s per call measured; direct parse ≈ 150-400ms budget).
+    // `None` = no local cache file for the configured remote → spawn path.
+    let mut pkgs = match appstream_search(trimmed, limit, &cfg.flatpak_remote_name()) {
+        Some(pkgs) => pkgs,
+        None => {
+            let timeout = Duration::from_secs(cfg.search.timeout_secs.max(1));
+            let Some(out) = run_flatpak(&["search", trimmed, "--json"], timeout) else {
+                return Ok(vec![]);
+            };
+            parse_flatpak_search_json(&out, limit)
+        }
     };
-    let mut pkgs = parse_flatpak_search_json(&out, limit);
     if use_regex {
         let re = regex::RegexBuilder::new(query.trim())
             .case_insensitive(true)
@@ -549,6 +560,289 @@ pub fn update_command_args(id: &str, noconfirm: bool) -> Vec<String> {
         args.push("-y".to_string());
     }
     args
+}
+
+// ---------------------------------------------------------------------------
+// Perf W: direct appstream cache search — no `flatpak` spawn.
+//
+// `flatpak search` reloads the full Flathub index on every invocation
+// (measured 3.4s warm on Flathub's ~49MB XML). The same index is a plain
+// local file — `<install>/appstream/<remote>/<arch>/active/appstream.xml` —
+// so search reads+scans it directly and stops at the limit. Fallback
+// (resilience): files count as absent when the remote is not cached, the
+// layout changed, or the file exceeds `MAX_APPSTREAM_BYTES`; then the old
+// bounded `flatpak search --json` spawn runs (fail-open chain). Flatpak
+// documents the appstream auto-refresh as "only when at least a day old",
+// so serving our own copy is never fresher than flatpak itself would.
+// `.gz`-only layouts keep working via the spawn fallback (no gzip dep).
+// ---------------------------------------------------------------------------
+
+/// Hard cap on appstream XML bytes we are willing to scan before treating a
+/// cache file as absent (bound resource use; oversized caches go to the
+/// spawn fallback).
+fn within_appstream_cap(bytes: u64) -> bool {
+    const MAX_APPSTREAM_BYTES: u64 = 256 * 1024 * 1024;
+    bytes <= MAX_APPSTREAM_BYTES
+}
+
+/// Roots that can host `appstream/<remote>/<arch>/active/appstream.xml`:
+/// XDG data dir (user install) plus the system install. Tests may override
+/// all roots with `PAKMAP_FLATPAK_APPSTREAM_ROOT` (chaos shims); an empty
+/// value is ignored.
+fn appstream_cache_roots() -> Vec<std::path::PathBuf> {
+    if let Ok(root) = std::env::var("PAKMAP_FLATPAK_APPSTREAM_ROOT")
+        && !root.trim().is_empty()
+    {
+        return vec![std::path::PathBuf::from(root)];
+    }
+    let mut roots = Vec::new();
+    if let Some(xdg) = dirs::data_dir() {
+        roots.push(xdg);
+    }
+    roots.push(std::path::PathBuf::from("/var/lib/flatpak"));
+    roots
+}
+
+/// Every `active/appstream.xml` for `remote` under `root` (arch-agnostic:
+/// flatpak lays out one subdir per arch under `appstream/<remote>/`).
+fn appstream_cache_files(root: &std::path::Path, remote: &str) -> Vec<std::path::PathBuf> {
+    let remote_dir = root.join("appstream").join(remote);
+    let Ok(entries) = std::fs::read_dir(&remote_dir) else {
+        return vec![];
+    };
+    let mut out: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path().join("active").join("appstream.xml"))
+        .filter(|p| p.is_file())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Fast-path entry. `Some` = local cache consulted (caller must not spawn);
+/// `None` = no usable cache file anywhere (caller falls back to the bounded
+/// `flatpak search` spawn). Timing is reported via the shared timer log.
+pub fn appstream_search(query: &str, limit: usize, remote: &str) -> Option<Vec<Package>> {
+    let roots = appstream_cache_roots();
+    let started = crate::timing::start("flatpak-appstream");
+    let found = appstream_search_roots(query, limit, remote, &roots);
+    started.finish(found.as_ref().map_or(0, |v| v.len()));
+    found
+}
+
+/// Same over explicit roots (testable; no env reads, no timing log).
+/// Dedupes by app-id across roots, first hit wins; `limit` caps the merge
+/// (0 = no limit).
+pub fn appstream_search_roots(
+    query: &str,
+    limit: usize,
+    remote: &str,
+    roots: &[std::path::PathBuf],
+) -> Option<Vec<Package>> {
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return None;
+    }
+    let mut merged: Vec<Package> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut consulted_any = false;
+    for root in roots {
+        for file in appstream_cache_files(root, remote) {
+            let size = std::fs::metadata(&file).map_or(0, |m| m.len());
+            if !within_appstream_cap(size) {
+                continue;
+            }
+            consulted_any = true;
+            if let Ok(text) = std::fs::read_to_string(&file) {
+                for pkg in parse_appstream_search(&text, query, limit, remote) {
+                    if seen.insert(pkg.name.clone()) {
+                        merged.push(pkg);
+                        if limit != 0 && merged.len() >= limit {
+                            return Some(merged);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if consulted_any { Some(merged) } else { None }
+}
+
+/// Search one appstream XML. Pure, never panics: garbage/unclosed tails
+/// return what was collected so far. Matches (ASCII-case-folded) on id +
+/// name + summary + keywords; preserves file order (`flatpak search` is
+/// relevance-ranked in the JSON path, ours is deterministic — parity of
+/// *fields* is the contract, ordering stays file order). `limit` truncates
+/// (0 = no limit). Version comes from the first `<release version="...">`.
+pub fn parse_appstream_search(xml: &str, query: &str, limit: usize, remote: &str) -> Vec<Package> {
+    let needle = query.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return vec![];
+    }
+    let mut out: Vec<Package> = Vec::new();
+    let mut cursor = 0usize;
+    while limit == 0 || out.len() < limit {
+        let Some(open_rel) = xml[cursor..].find("<component") else {
+            break;
+        };
+        let body_start = cursor + open_rel + "<component".len();
+        // Unclosed trailing component keeps what was collected, like the
+        // JSON parsers do on truncated input.
+        let Some(close_rel) = xml[body_start..].find("</component>") else {
+            break;
+        };
+        let block = &xml[body_start..body_start + close_rel];
+        cursor = body_start + close_rel + "</component>".len();
+        let Some(id) = tag_first_text(block, "id") else {
+            continue;
+        };
+        // Display parity with `flatpak search`: `<id>org.x.App.desktop` rows
+        // address the same app-id as plain `org.x.App`.
+        let id = if let Some(stripped) = id.strip_suffix(".desktop") {
+            stripped
+        } else {
+            id
+        };
+        if id.trim().is_empty() {
+            continue;
+        }
+        let id = id.trim();
+        let name = tag_first_text(block, "name").unwrap_or("");
+        let summary = tag_first_text(block, "summary").unwrap_or("");
+        let keywords = collect_tag_texts(block, "keyword");
+        let mut haystack = String::with_capacity(id.len() + name.len() + summary.len() + 64);
+        haystack.push_str(id);
+        haystack.push('\n');
+        haystack.push_str(name.trim());
+        haystack.push('\n');
+        haystack.push_str(summary.trim());
+        haystack.push('\n');
+        haystack.push_str(&keywords.join("\n"));
+        if !haystack.to_ascii_lowercase().contains(&needle) {
+            continue;
+        }
+        let version = release_version(block).unwrap_or_else(|| "?".to_string());
+        // `flatpak search --json` maps description = description.or(name);
+        // appstream has no separate long description here, so summary is the
+        // description with the display name as fallback (entity-unescaped).
+        let description = if summary.trim().is_empty() {
+            if name.trim().is_empty() {
+                None
+            } else {
+                Some(unescape_xml(name.trim()))
+            }
+        } else {
+            Some(unescape_xml(summary.trim()))
+        };
+        let mut pkg = Package::minimal(id.to_string(), version, "flatpak".to_string());
+        pkg.installed = false;
+        pkg.description = description;
+        pkg.url = Some(format!("flatpak:{remote}"));
+        out.push(pkg);
+    }
+    out
+}
+
+/// First `<tag ...>text</tag>` text in `block` (attribute-tolerant). Text
+/// fragments that start with more markup (e.g. `<summary><em>...`) are
+/// ignored — display-only degradation, never a search miss, since the
+/// haystack keeps the plain-text fields (id/name + keywords still match).
+fn tag_first_text<'a>(block: &'a str, tag: &str) -> Option<&'a str> {
+    let open_at = block.find(&format!("<{tag}"))?;
+    let gt_rel = block[open_at..].find('>')?;
+    let rest = &block[open_at + gt_rel + 1..];
+    let close_rel = rest.find(&format!("</{tag}>"))?;
+    let text = &rest[..close_rel];
+    if text.trim_start().starts_with('<') {
+        return None;
+    }
+    Some(text)
+}
+
+/// All `<tag ...>text</tag>` texts in `block`, in order, trimmed.
+fn collect_tag_texts(block: &str, tag: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = block[cursor..].find(&format!("<{tag}")) {
+        let content_at = cursor + open_rel;
+        let Some(gt_rel) = block[content_at..].find('>') else {
+            break;
+        };
+        let text_start = content_at + gt_rel + 1;
+        if text_start > block.len() {
+            break;
+        }
+        let rest = &block[text_start..];
+        let Some(close_rel) = rest.find(&format!("</{tag}>")) else {
+            break;
+        };
+        cursor = text_start + close_rel + tag.len() + 3;
+        let text = rest[..close_rel].trim();
+        if !text.is_empty() {
+            out.push(unescape_xml(text));
+        }
+    }
+    out
+}
+
+/// Version attribute of the first `<release version="...">` in `block`.
+/// None when absent/empty (becomes `"?"` upstream, mirroring flatpak).
+fn release_version(block: &str) -> Option<String> {
+    let rel_at = block.find("<release")?;
+    let after = &block[rel_at..];
+    let v_at = after.find("version=")?;
+    let post = &after[v_at + "version=".len()..];
+    let quote_at = post.find(['"', '\''])?;
+    let rest = &post[quote_at + 1..];
+    let end_at = rest.find(['"', '\''])?;
+    let v = rest[..end_at].trim();
+    if v.is_empty() {
+        None
+    } else {
+        Some(v.to_string())
+    }
+}
+
+/// Minimal XML entity unescape for display text (the 5 predefined entities
+/// plus the numeric `&#39;`). Unknown or numeric entities keep their bytes —
+/// display-only, so partial decoding never corrupts search matching.
+/// Always advances past at least one byte: an entity at end-of-string (`…&amp;`)
+/// must terminate, not spin.
+fn unescape_xml(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos..];
+        if let Some(r) = tail.strip_prefix("&lt;") {
+            out.push('<');
+            rest = r;
+        } else if let Some(r) = tail.strip_prefix("&gt;") {
+            out.push('>');
+            rest = r;
+        } else if let Some(r) = tail.strip_prefix("&amp;") {
+            out.push('&');
+            rest = r;
+        } else if let Some(r) = tail.strip_prefix("&quot;") {
+            out.push('"');
+            rest = r;
+        } else if let Some(r) = tail.strip_prefix("&apos;") {
+            out.push('\'');
+            rest = r;
+        } else if let Some(r) = tail.strip_prefix("&#39;") {
+            out.push('\'');
+            rest = r;
+        } else {
+            // Unknown/numeric entity: keep the '&', consume exactly one byte.
+            out.push('&');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Args for `flatpak update` (all refs).
@@ -1073,5 +1367,175 @@ mod tests {
         assert!(check_flatpak_updates_for(&pkgs, &cfg).is_empty());
         let cfg = crate::config::Config::default();
         assert!(check_flatpak_updates_for(&[], &cfg).is_empty());
+    }
+
+    // -------------------------------------------------------------------
+    // Appstream direct search (perf W) — pure parser + path plumbing.
+    // -------------------------------------------------------------------
+
+    const APPSTREAM_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<components version="0.15" origin="flathub">
+  <component type="desktop">
+    <id>org.mozilla.firefox.desktop</id>
+    <name>Firefox</name>
+    <summary>Fast, Private &amp; Safe Web Browser</summary>
+    <keywords><keyword>browser</keyword><keyword>internet</keyword></keywords>
+    <releases>
+      <release version="158.0" date="2026-01-01"/>
+      <release version="157.0" date="2025-12-01"/>
+    </releases>
+  </component>
+  <component type="runtime">
+    <id>org.freedesktop.Platform</id>
+    <name>Freedesktop Platform</name>
+    <summary>Shared runtime</summary>
+    <releases><release version="26.08" date="2026-02-01"/></releases>
+  </component>
+  <component type="desktop">
+    <id>org.x.Termui</id>
+    <name>TermUI</name>
+    <summary>A terminal ui demo</summary>
+  </component>
+</components>"#;
+
+    #[test]
+    fn appstream_fields_extracted_like_flatpak_search_json() {
+        let pkgs = parse_appstream_search(APPSTREAM_XML, "firefox", 0, "flathub");
+        assert_eq!(pkgs.len(), 1);
+        let ff = &pkgs[0];
+        // `.desktop` suffix stripped, version from first <release>, entities decode.
+        assert_eq!(ff.name, "org.mozilla.firefox");
+        assert_eq!(ff.version, "158.0");
+        assert_eq!(
+            ff.description.as_deref(),
+            Some("Fast, Private & Safe Web Browser")
+        );
+        assert_eq!(ff.url.as_deref(), Some("flatpak:flathub"));
+        assert_eq!(ff.repo, "flatpak");
+        assert!(!ff.installed);
+    }
+
+    #[test]
+    fn appstream_matches_keywords_and_folds_case() {
+        // Keyword hit ("browser") and an uppercase query both match.
+        assert_eq!(
+            parse_appstream_search(APPSTREAM_XML, "browser", 0, "r").len(),
+            1
+        );
+        assert_eq!(
+            parse_appstream_search(APPSTREAM_XML, "FIREFOX", 0, "r").len(),
+            1
+        );
+        // Runtime components are searchable, search results are apps or runtimes.
+        let rt = parse_appstream_search(APPSTREAM_XML, "platform", 0, "r");
+        assert!(rt.iter().all(|p| p.name == "org.freedesktop.Platform"));
+        assert_eq!(rt.len(), 1);
+        // "ui" only hits the TermUI summary.
+        assert_eq!(parse_appstream_search(APPSTREAM_XML, "ui", 0, "r").len(), 1);
+    }
+
+    #[test]
+    fn appstream_limit_truncates_and_zero_is_unbounded() {
+        assert_eq!(parse_appstream_search(APPSTREAM_XML, "a", 1, "r").len(), 1);
+        assert_eq!(parse_appstream_search(APPSTREAM_XML, "e", 2, "r").len(), 2);
+        // "e" matches all three summaries/ids.
+        assert_eq!(parse_appstream_search(APPSTREAM_XML, "e", 0, "r").len(), 3);
+    }
+
+    #[test]
+    fn appstream_garbage_and_empty_query_are_empty() {
+        assert!(parse_appstream_search("", "firefox", 0, "r").is_empty());
+        assert!(parse_appstream_search("plain text, not xml", "firefox", 0, "r").is_empty());
+        assert!(parse_appstream_search(APPSTREAM_XML, "", 0, "r").is_empty());
+        assert!(parse_appstream_search(APPSTREAM_XML, "   ", 0, "r").is_empty());
+        assert!(parse_appstream_search(APPSTREAM_XML, "not-in-here", 0, "r").is_empty());
+    }
+
+    #[test]
+    fn appstream_missing_releases_becomes_qmark() {
+        // Third fixture component has no <releases> — version falls to "?".
+        let pkgs = parse_appstream_search(APPSTREAM_XML, "termui", 0, "r");
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].version, "?");
+    }
+
+    #[test]
+    fn appstream_trailing_entity_terminates_and_unescapes() {
+        // Regression: an entity at end-of-text used to spin `unescape_xml`
+        // forever (cursor never advanced past it).
+        assert_eq!(unescape_xml("&amp;"), "&");
+        assert_eq!(unescape_xml("A&amp;"), "A&");
+        assert_eq!(unescape_xml("&amp;&amp;"), "&&");
+        assert_eq!(unescape_xml("B&lt;"), "B<");
+        assert_eq!(unescape_xml("&x;"), "&x;");
+        assert_eq!(unescape_xml("&"), "&");
+        let xml = r#"<components><component type="desktop"><id>org.q.Q</id><name>Q</name><summary>Salt &amp;</summary></component></components>"#;
+        let pkgs = parse_appstream_search(xml, "q", 0, "r");
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].description.as_deref(), Some("Salt &"));
+    }
+
+    #[test]
+    fn appstream_unclosed_tail_keeps_collected_results() {
+        let truncated =
+            format!("{APPSTREAM_XML}\n  <component type=\"desktop\">\n    <id>org.b.Clip</id>");
+        let pkgs = parse_appstream_search(&truncated, "firefox", 0, "r");
+        assert_eq!(pkgs.len(), 1);
+    }
+
+    #[test]
+    fn appstream_search_roots_merge_dedupe_and_detect_cache() {
+        let root_a = tempfile::tempdir().unwrap();
+        let root_b = tempfile::tempdir().unwrap();
+        // Same app-id in both roots: first root wins, second is deduped.
+        let dir = |root: &tempfile::TempDir| {
+            let p = root
+                .path()
+                .join("appstream")
+                .join("flathub")
+                .join("x86_64")
+                .join("active");
+            std::fs::create_dir_all(&p).unwrap();
+            p
+        };
+        std::fs::write(
+            dir(&root_a).join("appstream.xml"),
+            r#"<components><component type="desktop"><id>org.d.App</id><name>App</name><summary>one</summary><releases><release version="1.0"/></releases></component></components>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir(&root_b).join("appstream.xml"),
+            r#"<components><component type="desktop"><id>org.d.App</id><name>App</name><summary>one</summary><releases><release version="2.0"/></releases></component><component type="desktop"><id>org.b.Other</id><name>Other</name><summary>an app too</summary></component></components>"#,
+        )
+        .unwrap();
+        let merged = appstream_search_roots(
+            "app",
+            0,
+            "flathub",
+            &[root_a.path().to_path_buf(), root_b.path().to_path_buf()],
+        );
+        let pkgs = merged.unwrap_or_default();
+        assert_eq!(pkgs.len(), 2);
+        assert_eq!(pkgs[0].name, "org.d.App");
+        assert_eq!(pkgs[0].version, "1.0"); // first root wins the dedupe
+        assert_eq!(pkgs[1].name, "org.b.Other");
+        assert_eq!(pkgs[1].version, "?"); // no <releases> block
+        // No cache anywhere -> None (caller falls back to the spawn path).
+        let empty_root = tempfile::tempdir().unwrap();
+        assert!(appstream_search_roots("app", 0, "flathub", &[]).is_none());
+        assert!(
+            appstream_search_roots("app", 0, "flathub", &[empty_root.path().to_path_buf()])
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn appstream_cap_boundary_and_empty_remote() {
+        assert!(within_appstream_cap(0));
+        assert!(within_appstream_cap(256 * 1024 * 1024));
+        assert!(!within_appstream_cap(256 * 1024 * 1024 + 1));
+        assert!(!within_appstream_cap(u64::MAX));
+        // Empty remote name never consults files.
+        assert!(appstream_search_roots("a", 0, "  ", &[]).is_none());
     }
 }
