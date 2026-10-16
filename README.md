@@ -38,7 +38,7 @@ Built with **best skills**: `ratatui 0.30` (tui-design ecosystem-rust, immediate
 # ./install.sh --user  # no-sudo alternative (-> ~/.cargo/bin)
 # manual:
 cd /home/achraf/projects/pakmap
-cargo build --release  # 5.1M stripped, opt-level=z lto
+cargo build --release  # 5.5M stripped, opt-level=z lto
 sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap
 # or
 cargo install --path . --force  # -> ~/.cargo/bin/pakmap (add to PATH)
