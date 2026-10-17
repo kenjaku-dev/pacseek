@@ -1,4 +1,5 @@
 //! pakmap GUI backend: Tauri commands over the pakmap core library.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //!
 //! AC phase: staged streaming search mirroring the TUI orchestrator
 //! (`src/tui/app.rs` — per-leg threads, sequential joins, generation guard),
@@ -13,11 +14,14 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri::ipc::Channel;
 
+mod ops;
+
 /// Global state: the `active_search` generation guard — same semantics as the
 /// TUI (`App::active_search`): every new search supersedes in-flight legs
 /// incrementally, never silently mixing generations in the UI.
 pub struct AppState {
     active_search: Arc<AtomicU64>,
+    ops: ops::OpsState,
 }
 
 #[derive(Serialize)]
@@ -95,7 +99,7 @@ impl From<Package> for PackageDto {
 
 /// IPC contract: `{ code, message, hint }` — mirrors the CLI's stderr hints
 /// so the frontend never invents its own copy of recovery text.
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct GuiError {
     pub code: String,
     pub message: String,
@@ -174,6 +178,89 @@ fn get_config_summary() -> ConfigSummary {
 #[tauri::command]
 fn cancel_search(state: State<'_, AppState>) -> u64 {
     state.active_search.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+// ---------------------------------------------------------------------------
+// AD operations surface
+// ---------------------------------------------------------------------------
+
+/// Wire shape of `get_updates`: both legs degrade independently — an error in
+/// one leg is an explicit field, never a global command failure (resilience:
+/// a broken AUR mirror must not hide repo updates). Orphan names ride along
+/// because the Updates screen's orphans tool needs the same localdb scan.
+#[derive(Serialize)]
+pub struct UpdatesResult {
+    pub repo: Vec<pakmap::updates::PkgUpdate>,
+    pub aur: Vec<pakmap::updates::PkgUpdate>,
+    pub repo_err: Option<String>,
+    pub aur_err: Option<String>,
+    pub orphans: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ConfigFlags {
+    /// `behavior.readonly` — the frontend disables all mutating actions
+    pub readonly: bool,
+    pub flatpak_enabled: bool,
+}
+
+#[tauri::command]
+fn run_op(
+    op: ops::OpRequest,
+    on_event: Channel<ops::OpMessage>,
+    state: State<'_, AppState>,
+) -> u64 {
+    ops::dispatch_op(op, on_event, &state.ops)
+}
+
+/// Phase-boundary cancellation. Returns false for unknown/finished ops.
+#[tauri::command]
+fn cancel_operation(op_id: u64, state: State<'_, AppState>) -> bool {
+    state.ops.cancel(op_id)
+}
+
+/// Free the cancel-flag entry after the UI consumed the terminal event.
+#[tauri::command]
+fn drop_operation(op_id: u64, state: State<'_, AppState>) {
+    ops::drop_op(&state.ops, op_id);
+}
+
+#[tauri::command]
+fn get_config_flags() -> ConfigFlags {
+    let cfg = pakmap::config::Config::load();
+    ConfigFlags {
+        readonly: cfg.is_readonly(),
+        flatpak_enabled: cfg.behavior.flatpak_enabled,
+    }
+}
+
+#[tauri::command]
+fn get_updates() -> UpdatesResult {
+    let cfg = pakmap::config::Config::load();
+    let (repo, repo_err) = match pakmap::updates::check_repo_updates() {
+        Ok(v) => (v, None),
+        Err(e) => (Vec::new(), Some(format!("{e:#}"))),
+    };
+    let aur = pakmap::updates::check_aur_updates_blocking_cached(&cfg);
+    let orphans = pakmap::orphans::list_orphans()
+        .or_else(|_| pakmap::orphans::list_orphans_fallback())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    UpdatesResult {
+        repo,
+        aur,
+        repo_err,
+        aur_err: None,
+        orphans,
+    }
+}
+
+#[tauri::command]
+fn get_news() -> Vec<pakmap::news::NewsItem> {
+    let cfg = pakmap::config::Config::load();
+    pakmap::news::fetch_arch_news(&cfg)
 }
 
 /// Detail resolution for a selected row: for installed packages this resolves
@@ -385,13 +472,20 @@ pub fn run() {
     if let Err(e) = tauri::Builder::default()
         .manage(AppState {
             active_search: Arc::new(AtomicU64::new(0)),
+            ops: ops::OpsState::new(),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
             get_config_summary,
             search,
             cancel_search,
-            package_info
+            package_info,
+            run_op,
+            cancel_operation,
+            drop_operation,
+            get_config_flags,
+            get_updates,
+            get_news
         ])
         .run(tauri::generate_context!())
     {

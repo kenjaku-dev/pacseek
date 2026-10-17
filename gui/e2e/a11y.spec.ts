@@ -52,3 +52,39 @@ test("shortcuts dialog (modal) passes axe", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
   await scan(page);
 });
+
+test("updates tab passes axe", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await expect(page.getByRole("heading", { name: "Updates" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upgrade all (4)" })).toBeVisible();
+  await scan(page);
+});
+
+test("news tab passes axe", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "News" }).click();
+  await expect(page.getByRole("alert")).toContainText("Manual intervention required");
+  await scan(page);
+});
+
+test("confirm dialog (a11y modal) passes axe", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await page.getByRole("button", { name: "Refresh dbs" }).click();
+  await expect(page.getByRole("dialog", { name: "Refresh databases" })).toBeVisible();
+  await scan(page);
+});
+
+test("ops banner states pass axe (running and failed)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await page.getByRole("button", { name: "Update err-auth-sample" }).click();
+  await page
+    .getByRole("dialog", { name: "Update err-auth-sample" })
+    .getByRole("button", { name: "Update package" })
+    .click();
+  const result = page.getByRole("status", { name: "Operation result" });
+  await expect(result).toContainText("auth_dismissed", { timeout: 5_000 });
+  await scan(page);
+});

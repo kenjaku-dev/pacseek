@@ -5,7 +5,18 @@
 import * as realGateway from "./tauriGateway";
 import * as mockGateway from "./mockIpc";
 import { normalizeGuiError } from "./tauriGateway";
-import type { ConfigSummary, GuiError, PackageDto, SearchEvent, SearchFilters } from "../types";
+import type {
+  ConfigFlags,
+  ConfigSummary,
+  GuiError,
+  NewsItemDto,
+  OpMessage,
+  OpRequest,
+  PackageDto,
+  SearchEvent,
+  SearchFilters,
+  UpdatesResult,
+} from "../types";
 
 export type SearchEventSink = (event: SearchEvent) => void;
 export { normalizeGuiError };
@@ -32,6 +43,37 @@ export function getConfigSummary(): Promise<ConfigSummary> {
 
 export function getPackageInfo(name: string): Promise<PackageDto> {
   return gw.getPackageInfo(name);
+}
+
+// ---------------------------------------------------------------------------
+// AD operations surface
+// ---------------------------------------------------------------------------
+
+export function runOp(
+  request: OpRequest,
+  sink: (msg: OpMessage) => void,
+): Promise<number> {
+  return gw.runOp(request, sink);
+}
+
+export function cancelOperation(opId: number): Promise<boolean> {
+  return gw.cancelOperation(opId);
+}
+
+export function dropOperation(opId: number): Promise<void> {
+  return gw.dropOperation(opId);
+}
+
+export function getConfigFlags(): Promise<ConfigFlags> {
+  return gw.getConfigFlags();
+}
+
+export function getUpdates(): Promise<UpdatesResult> {
+  return gw.getUpdates();
+}
+
+export function getNews(): Promise<NewsItemDto[]> {
+  return gw.getNews();
 }
 
 /** normalizeGuiError is re-exported above — shared by both gateways. */

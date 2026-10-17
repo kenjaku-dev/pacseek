@@ -1,0 +1,244 @@
+// UpdatesScreen — phase AD parity: the TUI "Updates" screen as a tab. Both
+// legs load independently and degrade independently (a failed leg renders its
+// own error card; the good leg still shows). Upgrade-all is ONE transaction
+// (the TUI's semantics); per-row update runs the single-package install op.
+// Orphan removal rides on the same screen (batch, count from get_updates).
+import { useEffect, useState } from "react";
+import { getUpdates, normalizeGuiError } from "../lib/ipc";
+import type { OpRequest, UpdatesResult } from "../types";
+import { ErrorCard } from "./ErrorCard";
+import { QuickHint } from "./states";
+
+export interface UpdatesApi {
+  /** centralized action entry — App runs the confirm then op.run */
+  requestAction: (req: OpRequest, confirm: { title: string; body: string[]; danger?: boolean; confirmLabel: string }) => void;
+  readonly: boolean;
+}
+
+export function UpdatesScreen({ api }: { api: UpdatesApi }) {
+  const [data, setData] = useState<UpdatesResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    setError(null);
+    getUpdates()
+      .then((u) => {
+        if (live) setData(u);
+      })
+      .catch((e) => {
+        if (live) setError(normalizeGuiError(e).message);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (error !== null) {
+    return <SingleCard code="updates_failed" message={error} />;
+  }
+  if (data === null) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p role="status" className="text-[12px] text-muted-foreground">
+          Checking for updates…
+        </p>
+      </div>
+    );
+  }
+
+  const repoCount = data.repo.length;
+  const aurCount = data.aur.length;
+  const total = repoCount + aurCount;
+  const ro = api.readonly;
+
+  return (
+    <div className="mx-auto h-full max-w-3xl overflow-y-auto px-4 py-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">Updates</h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={ro || total === 0}
+            onClick={() =>
+              api.requestAction(
+                { kind: "upgrade" },
+                {
+                  title: "Full system upgrade",
+                  body: [
+                    `One transaction applies all ${total} update(s) (pkexec pacman -Syu --noconfirm).`,
+                    "The polkit dialog is the confirmation. A system transaction is never killed mid-flight.",
+                  ],
+                  danger: true,
+                  confirmLabel: "Upgrade system",
+                },
+              )
+            }
+            className="cursor-pointer rounded bg-destructive-strong px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-destructive/90 disabled:cursor-default disabled:opacity-50"
+          >
+            Upgrade all ({total})
+          </button>
+          <button
+            type="button"
+            disabled={ro}
+            onClick={() =>
+              api.requestAction(
+                { kind: "refresh" },
+                {
+                  title: "Refresh databases",
+                  body: ["Refreshes the sync databases (pkexec pacman -Sy)."],
+                  confirmLabel: "Refresh",
+                },
+              )
+            }
+            className="cursor-pointer rounded border border-border px-3 py-1.5 text-[12px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+          >
+            Refresh dbs
+          </button>
+          {data.orphans.length > 0 && (
+            <button
+              type="button"
+              disabled={ro}
+              onClick={() =>
+                api.requestAction(
+                  { kind: "remove_orphans" },
+                  {
+                    title: "Remove orphans",
+                    body: [
+                      `Removes ${data.orphans.length} orphaned package(s): ${data.orphans.join(", ")}.`,
+                      "Orphans are packages installed as dependencies that no installed package requires.",
+                    ],
+                    danger: true,
+                    confirmLabel: "Remove all",
+                  },
+                )
+              }
+              className="cursor-pointer rounded border border-destructive/50 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
+            >
+              Remove orphans ({data.orphans.length})
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={ro}
+            onClick={() =>
+              api.requestAction(
+                { kind: "clean", args: { keep: 2 } },
+                {
+                  title: "Clean package cache",
+                  body: [
+                    "Keeps the newest 2 versions of each package (pkexec paccache -r -k2).",
+                    "Requires the pacman-contrib package (paccache); the polkit dialog is the confirmation.",
+                  ],
+                  confirmLabel: "Clean cache",
+                },
+              )
+            }
+            className="cursor-pointer rounded border border-border px-3 py-1.5 text-[12px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+          >
+            Clean cache
+          </button>
+        </div>
+      </div>
+
+      {ro && (
+        <QuickHint text="readonly mode is enabled — mutating actions are disabled (behavior.readonly in ~/.config/pakmap/config.toml)" />
+      )}
+
+      {data.repo_err !== null && (
+        <ErrorCard code="repo_updates_failed" message={data.repo_err} hint="check mirror connectivity; repo updates will retry on reload" />
+      )}
+      {data.aur_err !== null && (
+        <ErrorCard code="aur_updates_failed" message={data.aur_err} hint="AUR RPC unreachable or unsupported mirror; AUR updates will retry on reload" />
+      )}
+
+      {data.repo.length > 0 && (
+        <section>
+          <h3 className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Official repositories <span className="ml-1 normal-case">{data.repo.length}</span>
+          </h3>
+          <ul role="list" aria-label="Official repository updates" className="divide-y divide-border/60">
+            {data.repo.map((u) => (
+              <li key={u.name} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-[12px] font-medium">{u.name}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {u.old_version} → {u.new_version}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="rounded bg-accent-tertiary/15 px-1.5 py-0.5 text-[10px] text-accent-tertiary">
+                    [{u.repo === "aur" ? "AUR" : u.repo.toUpperCase()}]
+                  </span>
+                  {u.out_of_date && (
+                    <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">
+                      [OOD]
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={ro}
+                    aria-label={`Update ${u.name}`}
+                    onClick={() =>
+                      api.requestAction(
+                        { kind: "install_repo", args: { name: u.name } },
+                        {
+                          title: `Update ${u.name}`,
+                          body: [
+                            `${u.old_version} → ${u.new_version} (pkexec pacman -S --needed --noconfirm ${u.name}).`,
+                          ],
+                          confirmLabel: "Update package",
+                        },
+                      )
+                    }
+                    className="cursor-pointer rounded border border-border px-2 py-0.5 text-[11px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+                  >
+                    Update
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {data.aur.length > 0 && (
+        <section>
+          <h3 className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            AUR <span className="ml-1 normal-case">{data.aur.length}</span>
+          </h3>
+          <ul role="list" aria-label="AUR updates" className="divide-y divide-border/60">
+            {data.aur.map((u) => (
+              <li key={u.name} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-[12px] font-medium">{u.name}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {u.old_version} → {u.new_version}
+                  </span>
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  update via search & detail pane (AUR builds run per package)
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {total === 0 && (
+        <p className="mt-8 text-center text-[12px] text-muted-foreground">
+          Everything is up to date. Run Refresh dbs after a config/mirror change.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SingleCard({ code, message }: { code: string; message: string }) {
+  return (
+    <div className="p-4">
+      <ErrorCard code={code} message={message} hint={null} />
+    </div>
+  );
+}

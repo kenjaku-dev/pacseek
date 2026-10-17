@@ -93,7 +93,7 @@ commands must not be `pub fn`** — on rustc ≥ 1.99 the command macro's genera
 `pub use {__cmd__*, …}` collides with `#[macro_export]` for public commands (E0255);
 keep commands crate-private.
 
-### Shipped (AB spike → AC search MVP)
+### Shipped (AB spike → AC search MVP; AD ops below)
 
 | Command | Signature | Returns |
 |---|---|---|
@@ -120,15 +120,33 @@ event sink, so IPC ordering races cannot mix runs; the backend's own generation 
 prevents wasted sends for superseded searches. Vitest fixtures mirror the TUI's four
 staged-flow tests (accumulate→swap, superseded discard, carried Done, fetch reset).
 
-### Planned command surface (AD remaining)
+### Shipped (AD — operations)
 
-| Command | Request | Response | Phase |
-|---|---|---|---|
-| `updates` | — | repo + AUR update lists | AD |
-| `list_installed` | `{ query, limit }` | installed packages (localdb fast path) | AD |
-| `stats` | — | status-bar counters | AE polish |
-| `install` / `remove` / `upgrade` / `clean` | op request | op handle; progress via events | AD |
-| `cancel_operation` | `{ op_id }` | ok (between phases only) | AD |
+| Command | Request | Response |
+|---|---|---|
+| `run_op` | `{ op: OpRequest, onEvent: Channel<OpMessage> }` | `u64` op_id; progress/done stream on the channel |
+| `cancel_operation` | `{ opId }` | `bool` — flag is honored at phase boundaries only |
+| `drop_operation` | `{ opId }` | frees the cancel-flag registry entry |
+| `get_config_flags` | — | `{ readonly, flatpak_enabled }` (actions disable up-front) |
+| `get_updates` | — | `UpdatesResult` (both legs degrade independently) |
+| `get_news` | — | `NewsItem[]` (RSS subset, `needs_action` flag) |
+
+`OpRequest` is a tagged union on the wire: `{ "kind": "install_repo", "args":
+{ "name" } }`, kinds `install_repo` / `install_flatpak` / `install_aur` / `remove` /
+`remove_flatpak` / `remove_orphans` / `upgrade` / `refresh` / `clean { keep }`.
+
+Screen layout of the surface: AUR installs are `clone (bounded) → build (makepkg,
+unprivileged, cwd=clone dir) → pkexec pacman -U`; the clone dir matches the
+TUI/diff module (`diff::clone_dir_for`); built *.pkg.tar.{zst,xz,gz} artifacts are
+globbed after makepkg. Repo ops are single-phase; flatpak ops run user-scope
+unprivileged (`--noninteractive`). Post-op, the AUR update memo invalidates
+(phase-Z audit rule: stale memos lie).
+
+Replacement of the AB "planned" list: `updates` → `get_updates`; the `list_installed`
+command was folded into the AC search local path (installed-only queries already hit
+localdb); `stats` remains AE polish. Mutating ops split into `run_op(kind,…)` +
+events instead of per-kind commands so one cancel-semantics implementation covers
+all nine kinds.
 
 ### Streaming events (one channel per operation)
 
@@ -142,13 +160,46 @@ paints immediately:
 { "generation": 7, "stage": "done",  "packages": [] }             // leg complete
 ```
 
-Operations (AD) emit progress from the existing `process.rs`/`timing.rs` plumbing
-(`indicatif` stays CLI-only):
+Operations (AD) emit `{ kind: "progress"|"done" }` messages on one channel per op
+(`indicatif` stays CLI-only; `percent` was dropped — pacman piped output carries no
+reliable percentages, phases+lines are the honest signal):
 
 ```jsonc
-// op://progress  { "op_id": 12, "phase": "install", "percent": 42, "line": "…" }
-// op://done      { "op_id": 12, "ok": true, "exit_code": 0 }
+// op messages
+{ "kind": "progress", "op_id": 12, "phase": "install", "line": "installing htop-3.4" }
+{ "kind": "done",     "op_id": 12, "ok": true, "exit_code": 0, "error": null }
+{ "kind": "done",     "op_id": 13, "ok": false, "exit_code": 255,
+  "error": { "code": "auth_dismissed", "message": "…", "hint": "…" } }
 ```
+
+Frontend ops model: a single active operation (`opsReducer`) — progress lines
+accumulate into a 100-line journal ring, `done` is terminal, messages for foreign
+op ids and post-terminal stragglers are dropped, and dismissing the banner calls
+`drop_operation`. One op runs at a time; the Cancel button stays honest with the
+copy "cancels before the next phase — the running transaction is never killed
+mid-flight".
+
+### AD failure matrix (stderr/exit → `{ code, message, hint }`)
+
+Classified from the bounded stderr tail in `ops.rs` (`classify_op_failure`); keep in
+sync with the table when adding codes:
+
+| code | trigger | the card tells the user |
+|---|---|---|
+| `pkexec_missing` | pkexec not on PATH (pre-flight) | install polkit + a polkit agent |
+| `auth_dismissed` | pkexec "disapproved/dismissed/not authorized" | retry and answer the polkit dialog |
+| `db_locked` | pacman "database is locked" | wait for the running pacman / stale db.lck |
+| `network_failure` | sync/download failures, timeouts | check mirrors and retry |
+| `unresolvable_deps` | "could not satisfy dependencies" | resolve the listed deps first |
+| `package_not_found` | "target not found" | spelling/repo coverage |
+| `readonly_mode` | `behavior.readonly = true` guard | how to turn readonly off |
+| `paccache_missing` | paccache not installed | install pacman-contrib |
+| `flatpak_missing` | flatpak not installed (pre-flight) | install flatpak or disable the leg |
+| `aur_clone_failed` | git clone/pull failure (bounded 300s) | connectivity to aur.archlinux.org |
+| `aur_build_empty` | makepkg produced no artifact | read the build journal (bad checksum/PKGBUILD) |
+| `invalid_name` | empty/traversal package name | reject banner (guard, pre-flight) |
+| `op_canceled` | cancel honored at a phase boundary | next-phase only, by design |
+| `op_failed` | anything else | last stderr line + exit code |
 
 ### Error envelope
 
@@ -173,18 +224,30 @@ the Rust structs 1:1.
 - GUI process stays unprivileged; pacman ops spawn `pkexec pacman` (polkit owns the
   auth UI); flatpak ops run user-scope. Missing pkexec ⇒ actionable error, never a
   root GUI.
+- GUI divergence from the TUI (documented, deliberate): pacman/paccache in the GUI
+  run **always non-interactive** (`--noconfirm`) because there is no TTY — the polkit
+  dialog replaces pacman's own confirm prompt. AUR builds run makepkg against the
+  cloned PKGBUILD (`-srf --noconfirm`); the live PKGBUILD review stays a TUI surface
+  (the GUI copies the link instead); AUR dependency resolution inherits pacman -U's
+  failure mode (missing AUR deps surface as `unresolvable_deps`).
 - Cancellation: searches cancelable anytime (generation guard makes it free); pacman
   transactions never killed mid-transaction — op cancel applies between phases only
-  (surfaced in UI copy, AD).
+  (`OpsState` cancel flags are read at clone→build→install boundaries), surfaced in
+  the UI copy, and the terminal event says so (`op_canceled`).
+- Arch news guard: intervention items surface as a News-tab banner and per-item
+  `[ACTION REQUIRED]` badges; the GUI does not gate the upgrade op on a live news
+  fetch (divergence: the TUI prompts; the banner is the discoverable path).
+- Links (news, package URLs) copy to the clipboard in AD; a real `tauri-plugin-opener`
+  lands with AF packaging (capability addition).
 
 ## Testing strategy (cross-phase)
 
 | Layer | Tooling | Guards |
 |---|---|---|
 | Core lib | existing 164 tests | frozen contract, untouched |
-| Tauri commands | Rust unit tests in `gui/src-tauri` (3: DTO full-field map, stage-name mirror, fail-open parse) | this contract |
-| Stream reducer | vitest (5) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests) |
-| E2E smoke | Playwright dev-browser battery (`pnpm e2e`) — UI runs against a scripted mock gateway through the same `src/lib/ipc` seam (`VITE_PAKMAP_MOCK_IPC=1`) | 9 flows: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; local gate in AC (CI wiring pending container browser deps), revisit in AF |
+| Tauri commands | Rust unit tests in `gui/src-tauri` (8: DTO full-field map, stage-name mirror, fail-open parse + AD: failure-matrix classification, keyof wire tagged unions, name guard, makepkg-artifact glob) | this contract |
+| Stream reducer | vitest (15: 5 search staged protocol + 10 ops) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests); ops: terminal-once semantics, ring cap, wrong-id guard, canceling copy |
+| E2E smoke | Playwright dev-browser battery (`pnpm e2e`), 25 specs | search: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; AD: tablist semantics, updates both-legs render, confirm → progress → done → dismiss, cancel → `op_canceled`, classified failure card, news intervention banner; axe scans: empty/done/detail/error/dialog + updates/news/confirm-dialog/failed-banner states; local gate in AC/AD (CI wiring pending container browser deps), revisit in AF |
 | Accessibility | axe-core scans (`e2e/a11y.spec.ts`) over 5 key states — empty/done/detail/error/modal | zero violations (wcag 2.1 A/AA); violations fail the battery |
 
 ## CI integration

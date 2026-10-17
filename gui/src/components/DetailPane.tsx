@@ -3,14 +3,22 @@
 // becomes a slide-in overlay below the content breakpoint (container query in
 // App grid).
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { getPackageInfo, normalizeGuiError } from "../lib/ipc";
-import type { PackageDto } from "../types";
+import type { OpRequest, PackageDto } from "../types";
 import { badgeLabels } from "./badges";
+import type { ConfirmSpec } from "./ConfirmDialog";
 
 export interface Selection {
   leg: "repo" | "aur" | "flatpak";
   pkg: PackageDto;
+}
+
+/** AD action wiring: App owns the confirm dialog + ops runner. */
+export interface PaneActions {
+  readonly: boolean;
+  busy: boolean;
+  onAction: (request: OpRequest, confirm: ConfirmSpec) => void;
 }
 
 function Field({ k, v }: { k: string; v: React.ReactNode }) {
@@ -49,7 +57,15 @@ function DepList({ title, list }: { title: string; list: string[] | null }) {
   );
 }
 
-export function DetailPane({ selection, onClose }: { selection: Selection; onClose: () => void }) {
+export function DetailPane({
+  selection,
+  actions,
+  onClose,
+}: {
+  selection: Selection;
+  actions?: PaneActions;
+  onClose: () => void;
+}) {
   const [full, setFull] = useState<PackageDto | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
 
@@ -140,11 +156,163 @@ export function DetailPane({ selection, onClose }: { selection: Selection; onClo
           </p>
         )}
 
+        {actions !== undefined && (
+          <OpActions merged={merged} actions={actions} />
+        )}
+
         <DepList title="depends" list={merged.depends} />
         <DepList title="optional depends" list={merged.optdepends} />
         <DepList title="required by" list={merged.required_by} />
         <DepList title="optional for" list={merged.optional_for} />
       </div>
     </aside>
+  );
+}
+
+/** Per-source action buttons with per-action risk copy. */
+function OpActions({ merged, actions }: { merged: PackageDto; actions: PaneActions }) {
+  const { readonly, busy, onAction } = actions;
+  const disabled = readonly || busy;
+
+  const isRepo = merged.repo !== "aur" && merged.repo !== "flatpak";
+  const isAur = merged.repo === "aur";
+  const isFlatpak = merged.repo === "flatpak";
+
+  const buttons: ReactElement[] = [];
+
+  if (isRepo && !merged.installed) {
+    buttons.push(
+      <button
+        key="install"
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onAction(
+            { kind: "install_repo", args: { name: merged.name } },
+            {
+              title: `Install ${merged.name}`,
+              body: [
+                `Installs ${merged.name} ${merged.version} (pkexec pacman -S --needed --noconfirm).`,
+                "The polkit dialog is the confirmation; the transaction runs non-interactively.",
+              ],
+              confirmLabel: "Install",
+            },
+          )
+        }
+        className="cursor-pointer rounded bg-accent-tertiary-strong px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-accent-tertiary/90 disabled:cursor-default disabled:opacity-50"
+      >
+        Install
+      </button>,
+    );
+  }
+
+  if (isAur && !merged.installed) {
+    buttons.push(
+      <button
+        key="install-aur"
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onAction(
+            { kind: "install_aur", args: { name: merged.name } },
+            {
+              title: `Build & install ${merged.name} (AUR)`,
+              body: [
+                `Clones ${merged.name}'s PKGBUILD from the AUR, builds with makepkg as your user, then installs: pkexec pacman -U --noconfirm.`,
+                "PKGBUILDs run arbitrary shell code during build — review it on aur.archlinux.org before installing. Cancel applies between phases (clone → build → install) only.",
+              ],
+              danger: true,
+              confirmLabel: "Build & install",
+            },
+          )
+        }
+        className="cursor-pointer rounded bg-accent-tertiary-strong px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-accent-tertiary/90 disabled:cursor-default disabled:opacity-50"
+      >
+        Build & install (AUR)
+      </button>,
+    );
+  }
+
+  if (isFlatpak) {
+    buttons.push(
+      <button
+        key="flatpak"
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          merged.installed
+            ? onAction(
+                { kind: "remove_flatpak", args: { app_id: merged.name } },
+                {
+                  title: `Remove ${merged.name}`,
+                  body: [`flatpak remove --user --noninteractive ${merged.name}.`],
+                  danger: true,
+                  confirmLabel: "Remove",
+                },
+              )
+            : onAction(
+                { kind: "install_flatpak", args: { app_id: merged.name } },
+                {
+                  title: `Install ${merged.name}`,
+                  body: [`flatpak install --user --noninteractive ${merged.name}.`],
+                  confirmLabel: "Install",
+                },
+              )
+        }
+        className={
+          merged.installed
+            ? "cursor-pointer rounded border border-destructive/50 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
+            : "cursor-pointer rounded bg-accent-tertiary-strong px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-accent-tertiary/90 disabled:cursor-default disabled:opacity-50"
+        }
+      >
+        {merged.installed ? "Remove (flatpak)" : "Install (flatpak)"}
+      </button>,
+    );
+  }
+
+  if (merged.installed) {
+    buttons.push(
+      <button
+        key="remove"
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onAction(
+            { kind: "remove", args: { name: merged.name } },
+            {
+              title: `Remove ${merged.name}`,
+              body: [
+                `Removes ${merged.name} and packages that depend on nothing else it pulled in (pkexec pacman -Rs --noconfirm).`,
+                merged.reason === "dependency"
+                  ? "This was installed as a dependency — removing may cascade."
+                  : "Removable dependencies go too; your settings files are kept.",
+              ],
+              danger: true,
+              confirmLabel: "Remove",
+            },
+          )
+        }
+        className="cursor-pointer rounded border border-destructive/50 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
+      >
+        Remove
+      </button>,
+    );
+  }
+
+  if (buttons.length === 0) return null;
+
+  return (
+    <div className="mt-3 border-t border-border/60 pt-3">
+      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Actions
+      </h4>
+      <div className="flex flex-wrap gap-2">{buttons}</div>
+      {readonly && (
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          readonly mode — actions disabled (behavior.readonly in config)
+        </p>
+      )}
+      {merged.orphan && <p className="mt-1.5 text-[10px] text-muted-foreground">orphaned dependency — nothing installed requires it anymore</p>}
+    </div>
   );
 }

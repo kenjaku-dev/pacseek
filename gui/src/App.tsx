@@ -1,23 +1,49 @@
-// App — AC search screen assembly: header (brand + field), filter bar,
-// master-detail @container grid, status stripe. Keyboard-complete per the
-// approved wireframe (gui/design/ac-search-brief.md).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// App — AD assembly: tabbed areas (Search | Updates | News) over the AC
+// search screen. Operations (install/remove/upgrade/clean/refresh) are owned
+// here: DetailPane and UpdatesScreen request (op, confirm-spec); App shows the
+// ConfirmDialog, then dispatches through useOps; OpsBanner streams progress
+// above the status stripe regardless of the active tab.
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { kbd } from "./components/kbd";
+import { ErrorCard } from "./components/ErrorCard";
 import { FilterBar } from "./components/FilterBar";
 import { SearchField } from "./components/SearchField";
 import { StagedResults } from "./components/StagedResults";
 import { DetailPane, type Selection } from "./components/DetailPane";
 import { StatusStripe } from "./components/StatusStripe";
+import { ConfirmDialog, type ConfirmSpec } from "./components/ConfirmDialog";
+import { OpsBanner } from "./components/OpsBanner";
+import { Tabs, TABS, type TabId } from "./components/Tabs";
+import { UpdatesScreen } from "./components/UpdatesScreen";
+import { NewsScreen } from "./components/NewsScreen";
+import { ModalDialog } from "./components/dialog";
 import { flattenRows } from "./state/searchReducer";
 import { useSearch } from "./lib/useSearch";
+import { useOps } from "./lib/useOps";
+import { getConfigFlags } from "./lib/ipc";
+import type { OpRequest } from "./types";
 import type { RowRef } from "./types";
-
-type ShortcutsOverlayState = { open: boolean };
 
 export default function App() {
   const search = useSearch();
+  const ops = useOps();
+  const [tab, setTab] = useState<TabId>("search");
   const [selection, setSelection] = useState<RowRef | null>(null);
-  const [shortcuts, setShortcuts] = useState<ShortcutsOverlayState>({ open: false });
+  const [shortcuts, setShortcuts] = useState<{ open: boolean }>({ open: false });
+  const [pending, setPending] = useState<{ req: OpRequest; spec: ConfirmSpec } | null>(null);
+  const [readonly, setReadonly] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getConfigFlags().then((f) => {
+      if (live) setReadonly(f.readonly);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const opBusy = ops.state.op !== null && ops.state.op.status === "running";
 
   // Fresh generation ⇒ the old selection belongs to a torn-down list.
   useEffect(() => setSelection(null), [search.state.generation]);
@@ -51,20 +77,34 @@ export default function App() {
     document.querySelector(`[data-rowkey="${key}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selection]);
 
-  // Window-level hotkeys. Unlike palettes with a separate command bar, the
-  // search input here stays focused — so arrows must keep working while typing
-  // (TUI parity: navigate results without leaving the input), and "?" must too
-  // ("?" is not a realistic search term). "/" stays a focus shortcut only.
+  // Window-level hotkeys — scoped to the search tab for anything row-related
+  // (arrows/Enter/Esc). "?" (shortcuts) and the tab hotkeys 1/2/3 are global.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing =
-        document.activeElement instanceof HTMLInputElement ||
-        document.activeElement instanceof HTMLTextAreaElement;
       if (e.key === "?") {
         e.preventDefault();
         e.stopPropagation(); // don't let a modal re-trigger or the query pick it up
         setShortcuts({ open: true });
-      } else if (e.key === "/" && !typing) {
+        return;
+      }
+      const tabByKey = TABS.find((t) => e.key === t.key);
+      if (tabByKey !== undefined) {
+        // digits 1/2/3 jump tabs, but never while typing in an input
+        const typing =
+          document.activeElement instanceof HTMLInputElement ||
+          document.activeElement instanceof HTMLTextAreaElement;
+        if (!typing) {
+          e.preventDefault();
+          setTab(tabByKey.id);
+        }
+        return;
+      }
+      if (tab !== "search") return;
+
+      const typing =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement;
+      if (e.key === "/" && !typing) {
         e.preventDefault();
         document.querySelector<HTMLInputElement>('input[aria-label="Search packages"]')?.focus();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -82,180 +122,183 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, selection]);
+  }, [move, selection, tab]);
+
+  // Central op entry: App shows the confirm, then dispatches to useOps.
+  const requestAction = useCallback(
+    (req: OpRequest, spec: ConfirmSpec) => {
+      setPending({ req, spec });
+    },
+    [],
+  );
+
+  const confirmRequested = useCallback(() => {
+    if (pending === null) return;
+    const { req } = pending;
+    setPending(null);
+    void ops.run(req);
+  }, [pending, ops]);
+
+  const dismissOp = useCallback(() => {
+    ops.dismiss();
+  }, [ops]);
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-4 border-b border-border bg-card px-4">
+      <header className="flex items-center gap-4 border-b border-border bg-card px-4 py-2">
         <div className="select-none">
           <h1 className="text-sm font-bold tracking-tight text-foreground">pakmap</h1>
           <span className="sr-only">
             {search.summary ? `version ${search.summary.app_version}` : "loading"}
           </span>
         </div>
-        <SearchField
-          value={search.query}
-          onInput={search.setQuery}
-          onSubmit={search.run}
-          onClear={search.clear}
-        />
         <span className="shrink-0 rounded bg-card-muted px-1.5 text-[10px] text-muted-foreground">
           {search.summary ? `v${search.summary.app_version}` : "…"}
         </span>
       </header>
 
-      <FilterBar
-        filters={search.filters}
-        flatpakAvailable={search.summary?.flatpak_enabled ?? true}
-        onSource={search.setSource}
-        onToggle={search.toggle}
-      />
+      <Tabs active={tab} onChange={setTab} />
 
-      {search.state.error !== null && (
-        <ErrorCard
-          code={search.state.error.code}
-          message={search.state.error.message}
-          hint={search.state.error.hint}
-        />
+      {tab === "search" && (
+        <div
+          role="tabpanel"
+          id="panel-search"
+          aria-labelledby="tab-search"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-2">
+            <SearchField
+              value={search.query}
+              onInput={search.setQuery}
+              onSubmit={search.run}
+              onClear={search.clear}
+            />
+          </div>
+
+          <FilterBar
+            filters={search.filters}
+            flatpakAvailable={search.summary?.flatpak_enabled ?? true}
+            onSource={search.setSource}
+            onToggle={search.toggle}
+          />
+
+          {search.state.error !== null && (
+            <ErrorCard
+              code={search.state.error.code}
+              message={search.state.error.message}
+              hint={search.state.error.hint}
+            />
+          )}
+
+          <main
+            className="@container relative flex min-h-0 flex-1 overflow-hidden"
+            aria-label="Search results"
+          >
+            <StagedResults state={search.state} selected={selection} onSelect={setSelection} />
+
+            {picked !== null && (
+              <div className="@min-[1020px]:static absolute inset-y-0 right-0 z-10 @min-[1020px]:w-[min(24rem,40%)] w-85 max-w-full shadow-lg">
+                <DetailPane
+                  selection={picked}
+                  actions={{ readonly, busy: opBusy, onAction: requestAction }}
+                  onClose={() => setSelection(null)}
+                />
+              </div>
+            )}
+
+            {picked !== null && (
+              <button
+                type="button"
+                className="@min-[1020px]:hidden absolute inset-0 z-[5] bg-black/40"
+                aria-label="Close detail overlay"
+                tabIndex={-1}
+                onClick={() => setSelection(null)}
+              />
+            )}
+          </main>
+        </div>
       )}
 
-      <main
-        className="@container relative flex min-h-0 flex-1 overflow-hidden"
-        aria-label="Search results"
-      >
-        <StagedResults state={search.state} selected={selection} onSelect={setSelection} />
+      {tab === "updates" && (
+        <div
+          role="tabpanel"
+          id="panel-updates"
+          aria-labelledby="tab-updates"
+          className="min-h-0 flex-1 overflow-hidden"
+        >
+          <UpdatesScreen api={{ requestAction, readonly }} />
+        </div>
+      )}
 
-        {picked !== null && (
-          <div className="@min-[1020px]:static absolute inset-y-0 right-0 z-10 @min-[1020px]:w-[min(24rem,40%)] w-85 max-w-full shadow-lg">
-            <DetailPane selection={picked} onClose={() => setSelection(null)} />
-          </div>
-        )}
+      {tab === "news" && (
+        <div
+          role="tabpanel"
+          id="panel-news"
+          aria-labelledby="tab-news"
+          className="min-h-0 flex-1 overflow-hidden"
+        >
+          <NewsScreen />
+        </div>
+      )}
 
-        {picked !== null && (
-          <button
-            type="button"
-            className="@min-[1020px]:hidden absolute inset-0 z-[5] bg-black/40"
-            aria-label="Close detail overlay"
-            tabIndex={-1}
-            onClick={() => setSelection(null)}
-          />
-        )}
-      </main>
+      {ops.state.op !== null && (
+        <OpsBanner ops={ops.state} onCancel={() => void ops.cancel()} onDismiss={dismissOp} />
+      )}
 
       <StatusStripe state={search.state} />
+
+      {pending !== null && (
+        <ConfirmDialog
+          spec={pending.spec}
+          onConfirm={confirmRequested}
+          onClose={() => setPending(null)}
+        />
+      )}
 
       {shortcuts.open && <ShortcutsOverlay onClose={() => setShortcuts({ open: false })} />}
     </div>
   );
 }
 
-function ErrorCard({ code, message, hint }: { code: string; message: string; hint: string | null }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2.5"
-    >
-      <div className="min-w-0">
-        <p className="text-[12px]">
-          <span className="font-semibold text-destructive">{code}</span>{" "}
-          <span className="text-foreground">{message}</span>
-        </p>
-        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">hint: {hint}</p>}
-      </div>
-    </div>
-  );
-}
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
-
 function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
-  // Proper dialog: focus moves into the panel on open, Tab cycles inside,
-  // Esc (and backdrop click) close. axe-verified with the AC smoke battery.
-  const panel = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = panel.current;
-    if (el === null) return;
-    const first = el.querySelector<HTMLElement>(FOCUSABLE) ?? el;
-    first.focus({ preventScroll: true });
-
-    const onKey = (e: KeyboardEvent) => {
-      e.stopPropagation(); // window hotkeys (Esc-clear etc.) must not double-fire
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (items.length === 0) return;
-      const cur = items.indexOf(document.activeElement as HTMLElement);
-      const next = e.shiftKey
-        ? (cur <= 0 ? items.length - 1 : cur - 1)
-        : (cur === -1 || cur === items.length - 1 ? 0 : cur + 1);
-      e.preventDefault();
-      items[next].focus();
-    };
-
-    el.addEventListener("keydown", onKey);
-    return () => el.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-        tabIndex={-1}
-        className="w-96 max-w-full rounded-xl border border-border bg-card p-5 shadow-xl"
-      >
-        <button
-          type="button"
-          aria-label="Close shortcuts"
-          onClick={onClose}
-          className="float-right cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          ✕
-        </button>
-        <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
-        <ul className="space-y-2 text-[12px] text-muted-foreground">
-          <li className="flex justify-between gap-4">
-            <span>Focus search</span>
-            <span>{kbd("/")}</span>
-          </li>
-          <li className="flex justify-between gap-4">
-            <span>Search now (skip debounce)</span>
-            <span>{kbd("Enter")}</span>
-          </li>
-          <li className="flex justify-between gap-4">
-            <span>Move between rows</span>
-            <span>
-              {kbd("↑")} {kbd("↓")}
-            </span>
-          </li>
-          <li className="flex justify-between gap-4">
-            <span>Open detail on selected row</span>
-            <span>{kbd("Enter")}</span>
-          </li>
-          <li className="flex justify-between gap-4">
-            <span>Close detail / clear search</span>
-            <span>{kbd("Esc")}</span>
-          </li>
-          <li className="flex justify-between gap-4">
-            <span>Toggle regex / installed / orphans</span>
-            <span>click chips</span>
-          </li>
-        </ul>
-        <p className="mt-3 text-[10px] text-muted-foreground">Esc closes this dialog.</p>
-      </div>
-    </div>
+    <ModalDialog label="Keyboard shortcuts" onClose={onClose}>
+      <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
+      <ul className="space-y-2 text-[12px] text-muted-foreground">
+        <li className="flex justify-between gap-4">
+          <span>Focus search</span>
+          <span>{kbd("/")}</span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Search now (skip debounce)</span>
+          <span>{kbd("Enter")}</span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Move between rows</span>
+          <span>
+            {kbd("↑")} {kbd("↓")}
+          </span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Open detail on selected row</span>
+          <span>{kbd("Enter")}</span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Close detail / clear search</span>
+          <span>{kbd("Esc")}</span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Switch area</span>
+          <span>
+            {kbd("1")} {kbd("2")} {kbd("3")}
+          </span>
+        </li>
+        <li className="flex justify-between gap-4">
+          <span>Toggle regex / installed / orphans</span>
+          <span>click chips</span>
+        </li>
+      </ul>
+      <p className="mt-3 text-[10px] text-muted-foreground">Esc closes this dialog.</p>
+    </ModalDialog>
   );
 }

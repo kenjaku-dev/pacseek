@@ -19,7 +19,11 @@
   --color-on-accent: #07131f;
   --color-accent-secondary: #38bdf8;
   --color-accent-tertiary: #a78bfa;
+  /* darker accent for solid fills under white text (WCAG AA ≥ 4.5:1) */
+  --color-accent-tertiary-strong: #7c3aed;
   --color-destructive: #ef4444;
+  /* darker destructive for solid fills under white text (WCAG AA ≥ 4.5:1) */
+  --color-destructive-strong: #b91c1c;
 
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
     Consolas, "Liberation Mono", monospace;

@@ -4,7 +4,18 @@
 // same trigger verb "err" that exercises the error card.
 //
 // Gated by VITE_PAKMAP_MOCK_IPC=1 so the production bundle never includes it.
-import type { ConfigSummary, GuiError, PackageDto, SearchEvent, SearchFilters } from "../types";
+import type {
+  ConfigFlags,
+  ConfigSummary,
+  GuiError,
+  NewsItemDto,
+  OpMessage,
+  OpRequest,
+  PackageDto,
+  SearchEvent,
+  SearchFilters,
+  UpdatesResult,
+} from "../types";
 import { normalizeGuiError } from "./tauriGateway";
 
 export type SearchEventSink = (event: SearchEvent) => void;
@@ -140,6 +151,152 @@ export async function getPackageInfo(name: string): Promise<PackageDto> {
     } satisfies GuiError;
   }
   return { ...hit, depends: ["gtk3", "nss"], optdepends: ["langpack"], reason: "explicit", required_by: [] };
+}
+
+// ---------------------------------------------------------------------------
+// AD operations surface — scripted fixtures with the same semantics the real
+// backend guarantees: progress ticks, terminal done exactly once, error codes
+// triggerable by op target name ("err-auth" → auth_dismissed etc.), AUR ops
+// stream clone/build/install phases.
+// ---------------------------------------------------------------------------
+
+const OP_STEP = FAST ? 30 : 200;
+const FIRST_OP_STEP = FAST ? 300 : 600;
+
+const UPDATES: UpdatesResult = {
+  repo: [
+    { name: "firefox", old_version: "139.0-1", new_version: "140.0-2", repo: "extra", out_of_date: false },
+    { name: "openssl", old_version: "3.5.1-1", new_version: "3.5.2-1", repo: "core", out_of_date: false },
+    { name: "err-auth-sample", old_version: "2.0-1", new_version: "2.1-1", repo: "core", out_of_date: false },
+  ],
+  aur: [
+    { name: "firefox-bin", old_version: "1.0-1", new_version: "1.1-1", repo: "aur", out_of_date: true },
+  ],
+  repo_err: null,
+  aur_err: null,
+  orphans: ["orphaned-lib", "some-widget"],
+};
+
+const NEWS: NewsItemDto[] = [
+  {
+    title: "net-leaked-broken requires manual intervention to upgrade",
+    link: "https://archlinux.org/news/net-leaked-broken-requires-manual-intervention/",
+    pub_date: "Mon, 12 Oct 2026 10:00:00 +0000",
+    pub_epoch: 1760256000,
+    needs_action: true,
+  },
+  {
+    title: "Regular update round",
+    link: "https://archlinux.org/news/regular-update-round/",
+    pub_date: "Tue, 06 Oct 2026 08:00:00 +0000",
+    pub_epoch: 1759732800,
+    needs_action: false,
+  },
+];
+
+export async function getConfigFlags(): Promise<ConfigFlags> {
+  return { readonly: false, flatpak_enabled: true };
+}
+
+export async function getUpdates(): Promise<UpdatesResult> {
+  return UPDATES;
+}
+
+export async function getNews(): Promise<NewsItemDto[]> {
+  return NEWS;
+}
+
+function mockOpErrorChains(request: OpRequest): { code: string; message: string; hint: string } | null {
+  const target =
+    request.kind === "install_repo" || request.kind === "remove"
+      ? request.args.name
+      : request.kind === "install_flatpak" || request.kind === "remove_flatpak"
+        ? request.args.app_id
+        : null;
+  if (target === null) return null;
+  if (target.startsWith("err-auth"))
+    return {
+      code: "auth_dismissed",
+      message: "authentication was dismissed or failed",
+      hint: "policykit denied the request",
+    };
+  if (target.startsWith("err-lock"))
+    return {
+      code: "db_locked",
+      message: "pacman database is locked",
+      hint: "wait for the running pacman to finish",
+    };
+  if (target.startsWith("err"))
+    return {
+      code: "op_failed",
+      message: `mock op failure for '${target}'`,
+      hint: "exit code 1 — see the operation journal",
+    };
+  return null;
+}
+
+/** phase-boundary cancel registry shared per browser page (module scope) */
+const canceledSet = new Set<number>();
+
+export async function runOp(
+  request: OpRequest,
+  sink: (msg: OpMessage) => void,
+): Promise<number> {
+  const id = ++counter;
+  const failure = mockOpErrorChains(request);
+  const phases =
+    request.kind === "install_aur"
+      ? ["clone", "build", "install"]
+      : ["prepare", "run"];
+  let step = 0;
+  const tick = (first: boolean) => {
+    if (counter !== id) return; // supersede guard like the real backend
+    // honor a phase-boundary cancel exactly like the backend guard: before
+    // the next tick (=phase), the op terminates with op_canceled
+    if (canceledSet.has(id)) {
+      canceledSet.delete(id);
+      sink({
+        kind: "done",
+        op_id: id,
+        ok: false,
+        exit_code: null,
+        error: {
+          code: "op_canceled",
+          message: "operation canceled before the next phase",
+          hint: "a running transaction is never killed mid-flight, by design",
+        },
+      });
+      return;
+    }
+    if (step < phases.length) {
+      sink({
+        kind: "progress",
+        op_id: id,
+        phase: phases[step]!,
+        line: `${phases[step] as string}: scripted line ${step + 1}`,
+      });
+      step += 1;
+      // slow first gap (like an open polkit dialog) then rapid ticks —
+      // gives the Cancel button a stable click window in the battery
+      setTimeout(() => tick(false), first ? FIRST_OP_STEP : OP_STEP);
+    } else if (failure !== null) {
+      sink({ kind: "done", op_id: id, ok: false, exit_code: 255, error: failure });
+    } else {
+      sink({ kind: "done", op_id: id, ok: true, exit_code: 0, error: null });
+      return;
+    }
+  };
+  setTimeout(() => tick(true), FIRST_OP_STEP);
+  return id;
+}
+
+export async function cancelOperation(opId: number): Promise<boolean> {
+  canceledSet.add(opId);
+  return opId <= counter;
+}
+
+export async function dropOperation(_opId: number): Promise<void> {
+  /* scripted gateway has no registry */
 }
 
 export { normalizeGuiError };

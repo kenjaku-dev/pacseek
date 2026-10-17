@@ -19,3 +19,6 @@ tauri-build = { version = "2.7", features = [] }
 pakmap = { path = "../.." }
 tauri = { version = "2.12", features = [] }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

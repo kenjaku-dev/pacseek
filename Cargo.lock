@@ -2992,6 +2992,7 @@ version = "0.7.0"
 dependencies = [
  "pakmap",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]

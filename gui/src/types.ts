@@ -67,3 +67,61 @@ export interface RowRef {
   stage: Exclude<SearchStage, "done">;
   name: string;
 }
+
+// ---------------------------------------------------------------------------
+// AD operations surface (docs/gui-architecture.md §operations)
+// ---------------------------------------------------------------------------
+
+export type OpRequest =
+  | { kind: "install_repo"; args: { name: string } }
+  | { kind: "install_flatpak"; args: { app_id: string } }
+  | { kind: "install_aur"; args: { name: string } }
+  | { kind: "remove"; args: { name: string } }
+  | { kind: "remove_flatpak"; args: { app_id: string } }
+  | { kind: "remove_orphans" }
+  | { kind: "upgrade" }
+  | { kind: "refresh" }
+  | { kind: "clean"; args: { keep: number } };
+
+/** `op://channel` messages — one Channel per operation. */
+export type OpMessage =
+  | { kind: "progress"; op_id: number; phase: string; line: string }
+  | {
+      kind: "done";
+      op_id: number;
+      ok: boolean;
+      exit_code: number | null;
+      error: GuiError | null;
+    };
+
+/** One available update, installed version → target version. */
+export interface PkgUpdateDto {
+  name: string;
+  old_version: string;
+  new_version: string;
+  repo: string;
+  out_of_date: boolean;
+}
+
+/** Both update legs degrade independently (see UpdatesResult comment). */
+export interface UpdatesResult {
+  repo: PkgUpdateDto[];
+  aur: PkgUpdateDto[];
+  repo_err: string | null;
+  aur_err: string | null;
+  orphans: string[];
+}
+
+export interface NewsItemDto {
+  title: string;
+  link: string;
+  pub_date: string | null;
+  pub_epoch: number | null;
+  needs_action: boolean;
+}
+
+/** Behavior flags the frontend needs up-front to disable mutating actions. */
+export interface ConfigFlags {
+  readonly: boolean;
+  flatpak_enabled: boolean;
+}
