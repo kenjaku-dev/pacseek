@@ -148,6 +148,9 @@ jobs:
       - name: Install (frontend)
         run: pnpm --dir gui install --frozen-lockfile
 
+      - name: Lint (eslint)
+        run: pnpm --dir gui lint
+
       - name: Build frontend (typecheck + vite)
         run: pnpm --dir gui build
 

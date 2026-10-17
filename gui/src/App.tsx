@@ -1,7 +1,7 @@
 // App — AC search screen assembly: header (brand + field), filter bar,
 // master-detail @container grid, status stripe. Keyboard-complete per the
 // approved wireframe (gui/design/ac-search-brief.md).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { kbd } from "./components/kbd";
 import { FilterBar } from "./components/FilterBar";
 import { SearchField } from "./components/SearchField";
@@ -12,10 +12,12 @@ import { flattenRows } from "./state/searchReducer";
 import { useSearch } from "./lib/useSearch";
 import type { RowRef } from "./types";
 
+type ShortcutsOverlayState = { open: boolean };
+
 export default function App() {
   const search = useSearch();
   const [selection, setSelection] = useState<RowRef | null>(null);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcuts, setShortcuts] = useState<ShortcutsOverlayState>({ open: false });
 
   // Fresh generation ⇒ the old selection belongs to a torn-down list.
   useEffect(() => setSelection(null), [search.state.generation]);
@@ -40,25 +42,41 @@ export default function App() {
     [rows, selection],
   );
 
-  // Window-level hotkeys (skipped while typing; the input handles its own Esc).
+  // Selection highlight scrolls into view; focus stays in the search input
+  // (palette behavior) and AT picks the row up via the listbox's
+  // aria-activedescendant.
+  useEffect(() => {
+    if (selection === null) return;
+    const key = CSS.escape(`${selection.stage}/${selection.name}`);
+    document.querySelector(`[data-rowkey="${key}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selection]);
+
+  // Window-level hotkeys. Unlike palettes with a separate command bar, the
+  // search input here stays focused — so arrows must keep working while typing
+  // (TUI parity: navigate results without leaving the input), and "?" must too
+  // ("?" is not a realistic search term). "/" stays a focus shortcut only.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing =
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement;
-      if (e.key === "?" && !typing) {
+      if (e.key === "?") {
         e.preventDefault();
-        setShortcutsOpen(true);
+        e.stopPropagation(); // don't let a modal re-trigger or the query pick it up
+        setShortcuts({ open: true });
       } else if (e.key === "/" && !typing) {
         e.preventDefault();
         document.querySelector<HTMLInputElement>('input[aria-label="Search packages"]')?.focus();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
+        // move() is a no-op when no rows exist — caret stays free until then
         move(e.key === "ArrowDown" ? 1 : -1);
-      } else if (e.key === "Escape" && selection !== null) {
+      } else if (e.key === "Escape" && !typing && selection !== null) {
         setSelection(null);
-      } else if (e.key === "Enter" && selection !== null && !typing) {
-        e.preventDefault(); // the row itself is actionable; focus follows the pane
+      } else if (e.key === "Enter" && selection !== null) {
+        // palette model: Enter on a live selection opens its detail (even while
+        // the input is focused — arrows keep focus there); no selection means
+        // the form submits a fresh search
+        e.preventDefault();
         document.querySelector<HTMLElement>('aside[aria-label="Package detail"]')?.focus();
       }
     };
@@ -70,9 +88,9 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <header className="flex items-center gap-4 border-b border-border bg-card px-4">
         <div className="select-none">
-          <span className="text-sm font-bold tracking-tight text-foreground">pakmap</span>
-          <span className="ml-2 rounded bg-card-muted px-1.5 text-[10px] text-muted-foreground">
-            {search.summary ? `v${search.summary.app_version}` : "…"}
+          <h1 className="text-sm font-bold tracking-tight text-foreground">pakmap</h1>
+          <span className="sr-only">
+            {search.summary ? `version ${search.summary.app_version}` : "loading"}
           </span>
         </div>
         <SearchField
@@ -81,6 +99,9 @@ export default function App() {
           onSubmit={search.run}
           onClear={search.clear}
         />
+        <span className="shrink-0 rounded bg-card-muted px-1.5 text-[10px] text-muted-foreground">
+          {search.summary ? `v${search.summary.app_version}` : "…"}
+        </span>
       </header>
 
       <FilterBar
@@ -123,7 +144,7 @@ export default function App() {
 
       <StatusStripe state={search.state} />
 
-      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+      {shortcuts.open && <ShortcutsOverlay onClose={() => setShortcuts({ open: false })} />}
     </div>
   );
 }
@@ -145,9 +166,42 @@ function ErrorCard({ code, message, hint }: { code: string; message: string; hin
   );
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
 function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
-  // Minimal dialog: Esc + backdrop close; full focus trap lands with the AC
-  // a11y pass (axe smoke) — noted for polish.
+  // Proper dialog: focus moves into the panel on open, Tab cycles inside,
+  // Esc (and backdrop click) close. axe-verified with the AC smoke battery.
+  const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = panel.current;
+    if (el === null) return;
+    const first = el.querySelector<HTMLElement>(FOCUSABLE) ?? el;
+    first.focus({ preventScroll: true });
+
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation(); // window hotkeys (Esc-clear etc.) must not double-fire
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (items.length === 0) return;
+      const cur = items.indexOf(document.activeElement as HTMLElement);
+      const next = e.shiftKey
+        ? (cur <= 0 ? items.length - 1 : cur - 1)
+        : (cur === -1 || cur === items.length - 1 ? 0 : cur + 1);
+      e.preventDefault();
+      items[next].focus();
+    };
+
+    el.addEventListener("keydown", onKey);
+    return () => el.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6"
@@ -156,11 +210,21 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
       }}
     >
       <div
+        ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
+        tabIndex={-1}
         className="w-96 max-w-full rounded-xl border border-border bg-card p-5 shadow-xl"
       >
+        <button
+          type="button"
+          aria-label="Close shortcuts"
+          onClick={onClose}
+          className="float-right cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          ✕
+        </button>
         <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
         <ul className="space-y-2 text-[12px] text-muted-foreground">
           <li className="flex justify-between gap-4">

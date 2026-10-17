@@ -181,11 +181,11 @@ the Rust structs 1:1.
 
 | Layer | Tooling | Guards |
 |---|---|---|
-| Core lib | existing 166 tests | frozen contract, untouched |
-| Tauri commands | Rust unit tests in `gui/src-tauri` (fixtures + `PAKMAP_SKIP_LIVE`) | this contract |
-| Stream reducer + components | vitest + Testing Library | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests) |
-| E2E smoke | Playwright against the dev server | search → results render |
-| Accessibility | axe-core in CI on key routes | no new violations |
+| Core lib | existing 164 tests | frozen contract, untouched |
+| Tauri commands | Rust unit tests in `gui/src-tauri` (3: DTO full-field map, stage-name mirror, fail-open parse) | this contract |
+| Stream reducer | vitest (5) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests) |
+| E2E smoke | Playwright dev-browser battery (`pnpm e2e`) — UI runs against a scripted mock gateway through the same `src/lib/ipc` seam (`VITE_PAKMAP_MOCK_IPC=1`) | 9 flows: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; local gate in AC (CI wiring pending container browser deps), revisit in AF |
+| Accessibility | axe-core scans (`e2e/a11y.spec.ts`) over 5 key states — empty/done/detail/error/modal | zero violations (wcag 2.1 A/AA); violations fail the battery |
 
 ## CI integration
 

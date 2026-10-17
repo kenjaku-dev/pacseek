@@ -4,6 +4,8 @@
 # AB: pnpm + GUI build noise
 gui/node_modules/
 gui/dist/
+gui/test-results/
+gui/playwright-report/
 gui/src-tauri/target/
 gui/src-tauri/gen/
 # auto-sync local noise

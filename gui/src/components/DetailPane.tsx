@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getPackageInfo, normalizeGuiError } from "../lib/ipc";
 import type { PackageDto } from "../types";
-import { badgeLabels } from "./ResultRow";
+import { badgeLabels } from "./badges";
 
 export interface Selection {
   leg: "repo" | "aur" | "flatpak";
@@ -77,7 +77,8 @@ export function DetailPane({ selection, onClose }: { selection: Selection; onClo
   return (
     <aside
       aria-label="Package detail"
-      className="h-full overflow-y-auto border-l border-border bg-card"
+      tabIndex={-1}
+      className="h-full overflow-y-auto border-l border-border bg-card outline-none"
     >
       <header className="sticky top-0 flex items-start justify-between gap-2 border-b border-border bg-card px-4 py-3">
         <div className="min-w-0">
