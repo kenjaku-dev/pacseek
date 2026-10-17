@@ -93,27 +93,40 @@ commands must not be `pub fn`** — on rustc ≥ 1.99 the command macro's genera
 `pub use {__cmd__*, …}` collides with `#[macro_export]` for public commands (E0255);
 keep commands crate-private.
 
-### Shipped in AB (spike surface)
+### Shipped (AB spike → AC search MVP)
 
 | Command | Signature | Returns |
 |---|---|---|
 | `greet` | `{ name: string }` | `string` (IPC liveness probe) |
-| `get_config_summary` | — | `ConfigSummary` |
-| `search_once` | `{ query: string }` | `PackageDto[]` \ `GuiError` (repo leg only, limit 8, no network) |
+| `get_config_summary` | — | `ConfigSummary` (incl. `debounce_ms` clamped 50..=5000) |
+| `search` | `{ query, filters, onEvent: Channel<SearchEvent> }` | `u64` generation; staged events stream on the channel |
+| `cancel_search` | — | `u64` (new generation; in-flight sends drop) |
+| `package_info` | `{ name }` | full `PackageDto` (installed rows: deps/reason via localdb) |
+
+`filters` (`SearchFilters`) = `{ source: "all"|"repo"|"aur"|"flatpak", aur_by,
+use_regex, installed_only, orphans_only, limit }`. Backend semantics mirror the TUI
+orchestrator exactly: `installed_only`/`orphans_only` become the LOCAL path
+(`search_local` + `list_orphans` intersection, enriched orphan badges) carried by a
+payload `done` event; otherwise three parallel legs join sequentially, each sent the
+moment it completes behind the `active_search` generation guard, then an empty `done`.
+A one-shot AUR warm (HEAD) overlaps the repo leg.
 
 `ConfigSummary` = `{ app_version, limit, source, timeout_secs, flatpak_enabled,
-custom_aur_rpc }` — resolved-effective config (user file, fail-open defaults).
+custom_aur_rpc, debounce_ms }` — resolved-effective config (user file, fail-open
+defaults).
 
-### Planned command surface (AC/AD)
+Frontend guard model: the hook binds a monotonic client identity into the per-call
+event sink, so IPC ordering races cannot mix runs; the backend's own generation guard
+prevents wasted sends for superseded searches. Vitest fixtures mirror the TUI's four
+staged-flow tests (accumulate→swap, superseded discard, carried Done, fetch reset).
+
+### Planned command surface (AD remaining)
 
 | Command | Request | Response | Phase |
 |---|---|---|---|
-| `search` | `{ query, sources, aur_by, regex, installed_only, orphans_only, limit }` | kicks off staged stream (events below) | AC |
-| `cancel_search` | `{ generation }` | ok | AC |
-| `updates` | — | repo + AUR update lists | AC (lite badges) / AD |
-| `list_installed` | `{ query, limit }` | installed packages (localdb fast path) | AC |
-| `package_info` | `{ name, source }` | detail record (files/deps/votes) | AC |
-| `stats` | — | status-bar counters | AE |
+| `updates` | — | repo + AUR update lists | AD |
+| `list_installed` | `{ query, limit }` | installed packages (localdb fast path) | AD |
+| `stats` | — | status-bar counters | AE polish |
 | `install` / `remove` / `upgrade` / `clean` | op request | op handle; progress via events | AD |
 | `cancel_operation` | `{ op_id }` | ok (between phases only) | AD |
 
@@ -148,8 +161,10 @@ an actionable error card with the CLI's hint text.
 
 ### Frontend DTO
 
-`PackageDto` (AB): `{ name, version, description, repo, installed }` (`From<&Package>`);
-AC extends with votes/maintainer/out-of-date/flatpak app id as the detail pane needs.
+`PackageDto` (AC): every `Package` field the detail pane needs — `{ name, version,
+description, repo, arch, url, installed, votes, popularity, out_of_date, maintainer,
+last_modified, depends, optdepends, required_by, optional_for, reason, orphan }`;
+list badges (`OOD`/`ORPHAN`/`UNMAINTAINED`) keep `Package::badges()` semantics.
 camelCase? — no: Tauri serializes field names as-is (snake_case), the TS types mirror
 the Rust structs 1:1.
 

@@ -1,159 +1,197 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+// App — AC search screen assembly: header (brand + field), filter bar,
+// master-detail @container grid, status stripe. Keyboard-complete per the
+// approved wireframe (gui/design/ac-search-brief.md).
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { kbd } from "./components/kbd";
+import { FilterBar } from "./components/FilterBar";
+import { SearchField } from "./components/SearchField";
+import { StagedResults } from "./components/StagedResults";
+import { DetailPane, type Selection } from "./components/DetailPane";
+import { StatusStripe } from "./components/StatusStripe";
+import { flattenRows } from "./state/searchReducer";
+import { useSearch } from "./lib/useSearch";
+import type { RowRef } from "./types";
 
-// AB spike panel: proves the three IPC round trips (ping · config · repo
-// search) against the Rust core through Tauri commands. The real staged
-// streaming UI is phase AC — expect intentionally minimal visuals here.
+export default function App() {
+  const search = useSearch();
+  const [selection, setSelection] = useState<RowRef | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
-interface ConfigSummary {
-  app_version: string;
-  limit: number;
-  source: string;
-  timeout_secs: number;
-  flatpak_enabled: boolean;
-  custom_aur_rpc: boolean;
-}
+  // Fresh generation ⇒ the old selection belongs to a torn-down list.
+  useEffect(() => setSelection(null), [search.state.generation]);
 
-interface PackageDto {
-  name: string;
-  version: string;
-  description: string | null;
-  repo: string;
-  installed: boolean;
-}
+  const rows = useMemo(() => flattenRows(search.state), [search.state]);
 
-interface GuiError {
-  code: string;
-  message: string;
-  hint?: string;
-}
+  const picked = useMemo<Selection | null>(() => {
+    if (selection === null) return null;
+    const hit = rows.find((r) => r.leg === selection.stage && r.pkg.name === selection.name);
+    return hit ? { leg: hit.leg, pkg: hit.pkg } : null;
+  }, [rows, selection]);
 
-function asGuiError(e: unknown): GuiError {
-  if (typeof e === "object" && e !== null && "code" in e && "message" in e) {
-    return e as GuiError;
-  }
-  return { code: "unknown", message: String(e) };
-}
+  const move = useCallback(
+    (delta: 1 | -1) => {
+      if (rows.length === 0) return;
+      const cur = selection
+        ? rows.findIndex((r) => r.leg === selection.stage && r.pkg.name === selection.name)
+        : -1;
+      const next = rows[(cur + delta + rows.length) % rows.length];
+      setSelection({ stage: next.leg, name: next.pkg.name });
+    },
+    [rows, selection],
+  );
 
-function Card({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+  // Window-level hotkeys (skipped while typing; the input handles its own Esc).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement;
+      if (e.key === "?" && !typing) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      } else if (e.key === "/" && !typing) {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>('input[aria-label="Search packages"]')?.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        move(e.key === "ArrowDown" ? 1 : -1);
+      } else if (e.key === "Escape" && selection !== null) {
+        setSelection(null);
+      } else if (e.key === "Enter" && selection !== null && !typing) {
+        e.preventDefault(); // the row itself is actionable; focus follows the pane
+        document.querySelector<HTMLElement>('aside[aria-label="Package detail"]')?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [move, selection]);
+
   return (
-    <section className="rounded-xl border border-slate-700 bg-slate-800/60 p-4 shadow">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
-        {title}
-      </h2>
-      {children}
-    </section>
+    <div className="flex h-screen flex-col">
+      <header className="flex items-center gap-4 border-b border-border bg-card px-4">
+        <div className="select-none">
+          <span className="text-sm font-bold tracking-tight text-foreground">pakmap</span>
+          <span className="ml-2 rounded bg-card-muted px-1.5 text-[10px] text-muted-foreground">
+            {search.summary ? `v${search.summary.app_version}` : "…"}
+          </span>
+        </div>
+        <SearchField
+          value={search.query}
+          onInput={search.setQuery}
+          onSubmit={search.run}
+          onClear={search.clear}
+        />
+      </header>
+
+      <FilterBar
+        filters={search.filters}
+        flatpakAvailable={search.summary?.flatpak_enabled ?? true}
+        onSource={search.setSource}
+        onToggle={search.toggle}
+      />
+
+      {search.state.error !== null && (
+        <ErrorCard
+          code={search.state.error.code}
+          message={search.state.error.message}
+          hint={search.state.error.hint}
+        />
+      )}
+
+      <main
+        className="@container relative flex min-h-0 flex-1 overflow-hidden"
+        aria-label="Search results"
+      >
+        <StagedResults state={search.state} selected={selection} onSelect={setSelection} />
+
+        {picked !== null && (
+          <div className="@min-[1020px]:static absolute inset-y-0 right-0 z-10 @min-[1020px]:w-[min(24rem,40%)] w-85 max-w-full shadow-lg">
+            <DetailPane selection={picked} onClose={() => setSelection(null)} />
+          </div>
+        )}
+
+        {picked !== null && (
+          <button
+            type="button"
+            className="@min-[1020px]:hidden absolute inset-0 z-[5] bg-black/40"
+            aria-label="Close detail overlay"
+            tabIndex={-1}
+            onClick={() => setSelection(null)}
+          />
+        )}
+      </main>
+
+      <StatusStripe state={search.state} />
+
+      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+    </div>
   );
 }
 
-export default function App() {
-  const [greeting, setGreeting] = useState<string | null>(null);
-  const [config, setConfig] = useState<ConfigSummary | null>(null);
-  const [results, setResults] = useState<PackageDto[] | null>(null);
-  const [error, setError] = useState<GuiError | null>(null);
-
-  useEffect(() => {
-    invoke<ConfigSummary>("get_config_summary")
-      .then(setConfig)
-      .catch((e) => setError(asGuiError(e)));
-  }, []);
-
-  const runSearch = useCallback((query: string) => {
-    setError(null);
-    setResults(null);
-    invoke<PackageDto[]>("search_once", { query })
-      .then(setResults)
-      .catch((e) => setError(asGuiError(e)));
-  }, []);
-
+function ErrorCard({ code, message, hint }: { code: string; message: string; hint: string | null }) {
   return (
-    <main className="min-h-screen bg-slate-900 p-8 text-slate-100">
-      <h1 className="mb-1 text-2xl font-bold">pakmap · GUI spike (AB)</h1>
-      <p className="mb-6 text-sm text-slate-400">
-        Tauri 2.12 + React 19 — the search UI itself arrives in phase AC.
-      </p>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title="IPC ping (greet)">
-          <button
-            type="button"
-            onClick={() =>
-              invoke<string>("greet", { name: "pakmap" })
-                .then(setGreeting)
-                .catch((e) => setError(asGuiError(e)))
-            }
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
-          >
-            Call greet
-          </button>
-          {greeting && <p className="mt-2 text-slate-300">{greeting}</p>}
-        </Card>
-
-        <Card title="Config summary (get_config_summary)">
-          {config ? (
-            <ul className="text-sm text-slate-300">
-              <li>version: {config.app_version}</li>
-              <li>
-                search limit: {config.limit} · source: {config.source}
-              </li>
-              <li>
-                timeout: {config.timeout_secs}s · flatpak:{" "}
-                {config.flatpak_enabled ? "on" : "off"}
-              </li>
-            </ul>
-          ) : (
-            <p className="text-slate-500">loading…</p>
-          )}
-        </Card>
-
-        <Card title="Repo search (search_once — local DB, no network)">
-          {["firefox", "pacman", "ripgrep"].map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => runSearch(q)}
-              className="mr-2 rounded-lg bg-slate-700 px-3 py-1.5 text-sm hover:bg-slate-600"
-            >
-              {q}
-            </button>
-          ))}
-          {results && (
-            <ul className="mt-3 max-h-56 space-y-1 overflow-auto text-sm">
-              {results.map((p) => (
-                <li key={`${p.repo}/${p.name}`} className="truncate">
-                  <span className="rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-300">
-                    {p.repo}
-                  </span>{" "}
-                  <span className="font-medium">{p.name}</span>{" "}
-                  <span className="text-slate-400">{p.version}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card title="Error envelope demo">
-          {error ? (
-            <div className="text-sm">
-              <p className="font-mono text-amber-300">{error.code}</p>
-              <p className="text-slate-300">{error.message}</p>
-              {error.hint && (
-                <p className="mt-1 text-slate-400">hint: {error.hint}</p>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">
-              no error yet — the empty-query trip fires on demand
-            </p>
-          )}
-        </Card>
+    <div
+      role="alert"
+      className="flex items-start gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2.5"
+    >
+      <div className="min-w-0">
+        <p className="text-[12px]">
+          <span className="font-semibold text-destructive">{code}</span>{" "}
+          <span className="text-foreground">{message}</span>
+        </p>
+        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">hint: {hint}</p>}
       </div>
-    </main>
+    </div>
+  );
+}
+
+function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
+  // Minimal dialog: Esc + backdrop close; full focus trap lands with the AC
+  // a11y pass (axe smoke) — noted for polish.
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        className="w-96 max-w-full rounded-xl border border-border bg-card p-5 shadow-xl"
+      >
+        <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
+        <ul className="space-y-2 text-[12px] text-muted-foreground">
+          <li className="flex justify-between gap-4">
+            <span>Focus search</span>
+            <span>{kbd("/")}</span>
+          </li>
+          <li className="flex justify-between gap-4">
+            <span>Search now (skip debounce)</span>
+            <span>{kbd("Enter")}</span>
+          </li>
+          <li className="flex justify-between gap-4">
+            <span>Move between rows</span>
+            <span>
+              {kbd("↑")} {kbd("↓")}
+            </span>
+          </li>
+          <li className="flex justify-between gap-4">
+            <span>Open detail on selected row</span>
+            <span>{kbd("Enter")}</span>
+          </li>
+          <li className="flex justify-between gap-4">
+            <span>Close detail / clear search</span>
+            <span>{kbd("Esc")}</span>
+          </li>
+          <li className="flex justify-between gap-4">
+            <span>Toggle regex / installed / orphans</span>
+            <span>click chips</span>
+          </li>
+        </ul>
+        <p className="mt-3 text-[10px] text-muted-foreground">Esc closes this dialog.</p>
+      </div>
+    </div>
   );
 }

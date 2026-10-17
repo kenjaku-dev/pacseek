@@ -1,13 +1,64 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — mapped from pakmap-landing design-system MASTER.md
+ * (`design-system/pakmap/MASTER.md`, synced 2026-10-16 with the shipped
+ * globals.css). Language tokens live in AE; these values are the single
+ * source until theme.toml mapping lands. No other hard-coded colors.
+ */
+@theme {
+  --color-background: #080d17;
+  --color-primary: #1e293b;
+  --color-secondary: #334155;
+  --color-card: #0f1728;
+  --color-card-muted: #162033;
+  --color-foreground: #f1f5f9;
+  --color-muted-foreground: #94a3b8;
+  --color-border: #2a3a55;
+  --color-accent: #22c55e;
+  --color-on-accent: #07131f;
+  --color-accent-secondary: #38bdf8;
+  --color-accent-tertiary: #a78bfa;
+  --color-destructive: #ef4444;
+
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+    Consolas, "Liberation Mono", monospace;
+}
+
 :root {
-  /* AC replaces this with shared tokens from pakmap-landing/design-system */
   color-scheme: dark;
 }
 
 body {
   margin: 0;
-  font-family:
-    ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Row insertion fade for streaming results — the only motion in AC, and it
+ * respects prefers-reduced-motion per the
+design-system rules.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes row-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .row-in {
+    animation: row-in 150ms ease-out;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
