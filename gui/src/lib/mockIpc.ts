@@ -14,6 +14,7 @@ import type {
   PackageDto,
   SearchEvent,
   SearchFilters,
+  StatsDto,
   UpdatesResult,
 } from "../types";
 import { normalizeGuiError } from "./tauriGateway";
@@ -204,6 +205,24 @@ export async function getUpdates(): Promise<UpdatesResult> {
 
 export async function getNews(): Promise<NewsItemDto[]> {
   return NEWS;
+}
+
+const STATS: StatsDto = {
+  explicit: 741,
+  dependencies: 1203,
+  orphans: 2,
+  updates_repo: 3,
+  updates_aur: 1,
+  updates_flatpak: 0,
+  flatpak_installed: 1,
+  cache_pacman_bytes: 4_200_000_000,
+  cache_pakmap_bytes: 384_000_000,
+  cache_pacman_fmt: "4.2 GiB",
+  cache_pakmap_fmt: "366.2 MiB",
+};
+
+export function getStats(): Promise<StatsDto> {
+  return Promise.resolve(STATS);
 }
 
 function mockOpErrorChains(request: OpRequest): { code: string; message: string; hint: string } | null {

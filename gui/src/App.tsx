@@ -14,12 +14,15 @@ import { StatusStripe } from "./components/StatusStripe";
 import { ConfirmDialog, type ConfirmSpec } from "./components/ConfirmDialog";
 import { OpsBanner } from "./components/OpsBanner";
 import { Tabs, TABS, type TabId } from "./components/Tabs";
+import { ThemeToggle } from "./components/ThemeToggle";
+import { BrandMark } from "./components/BrandMark";
 import { UpdatesScreen } from "./components/UpdatesScreen";
 import { NewsScreen } from "./components/NewsScreen";
 import { ModalDialog } from "./components/dialog";
 import { flattenRows } from "./state/searchReducer";
 import { useSearch } from "./lib/useSearch";
 import { useOps } from "./lib/useOps";
+import { useTheme } from "./lib/useTheme";
 import { getConfigFlags } from "./lib/ipc";
 import type { OpRequest } from "./types";
 import type { RowRef } from "./types";
@@ -27,6 +30,7 @@ import type { RowRef } from "./types";
 export default function App() {
   const search = useSearch();
   const ops = useOps();
+  const theme = useTheme();
   const [tab, setTab] = useState<TabId>("search");
   const [selection, setSelection] = useState<RowRef | null>(null);
   const [shortcuts, setShortcuts] = useState<{ open: boolean }>({ open: false });
@@ -145,16 +149,20 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-4 border-b border-border bg-card px-4 py-2">
+      <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-2">
+        <BrandMark size={18} />
         <div className="select-none">
           <h1 className="text-sm font-bold tracking-tight text-foreground">pakmap</h1>
           <span className="sr-only">
             {search.summary ? `version ${search.summary.app_version}` : "loading"}
           </span>
         </div>
-        <span className="shrink-0 rounded bg-card-muted px-1.5 text-[10px] text-muted-foreground">
+        <span className="shrink-0 rounded bg-card-muted px-1.5 text-2xs text-muted-foreground">
           {search.summary ? `v${search.summary.app_version}` : "…"}
         </span>
+        <div className="ml-auto">
+          <ThemeToggle mode={theme.mode} onChange={theme.setMode} />
+        </div>
       </header>
 
       <Tabs active={tab} onChange={setTab} />
@@ -264,7 +272,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
   return (
     <ModalDialog label="Keyboard shortcuts" onClose={onClose}>
       <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
-      <ul className="space-y-2 text-[12px] text-muted-foreground">
+      <ul className="space-y-2 text-xs text-muted-foreground">
         <li className="flex justify-between gap-4">
           <span>Focus search</span>
           <span>{kbd("/")}</span>
@@ -298,7 +306,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
           <span>click chips</span>
         </li>
       </ul>
-      <p className="mt-3 text-[10px] text-muted-foreground">Esc closes this dialog.</p>
+      <p className="mt-3 text-2xs text-muted-foreground">Esc closes this dialog.</p>
     </ModalDialog>
   );
 }

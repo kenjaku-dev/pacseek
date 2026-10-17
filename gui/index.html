@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>pakmap</title>
+    <script>
+      // Theme bootstrap: resolve BEFORE first paint so there is no flash of
+      // the default dark scheme on light-system setups. Mirrors useTheme:
+      // stored "system" (or nothing) follows prefers-color-scheme.
+      (function () {
+        try {
+          var t = localStorage.getItem("pakmap-theme");
+          var light =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches;
+          document.documentElement.dataset.theme =
+            t === "light" || t === "dark" ? t : light ? "light" : "dark";
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -130,6 +130,7 @@ staged-flow tests (accumulate→swap, superseded discard, carried Done, fetch re
 | `get_config_flags` | — | `{ readonly, flatpak_enabled }` (actions disable up-front) |
 | `get_updates` | — | `UpdatesResult` (both legs degrade independently) |
 | `get_news` | — | `NewsItem[]` (RSS subset, `needs_action` flag) |
+| `get_stats` | — | `GuiStats` (TUI `--stats` parity — AE) |
 
 `OpRequest` is a tagged union on the wire: `{ "kind": "install_repo", "args":
 { "name" } }`, kinds `install_repo` / `install_flatpak` / `install_aur` / `remove` /
@@ -144,8 +145,8 @@ unprivileged (`--noninteractive`). Post-op, the AUR update memo invalidates
 
 Replacement of the AB "planned" list: `updates` → `get_updates`; the `list_installed`
 command was folded into the AC search local path (installed-only queries already hit
-localdb); `stats` remains AE polish. Mutating ops split into `run_op(kind,…)` +
-events instead of per-kind commands so one cancel-semantics implementation covers
+localdb); `stats` shipped in AE as `get_stats`. Mutating ops split into `run_op(kind,…)`
++ events instead of per-kind commands so one cancel-semantics implementation covers
 all nine kinds.
 
 ### Streaming events (one channel per operation)
@@ -240,15 +241,93 @@ the Rust structs 1:1.
 - Links (news, package URLs) copy to the clipboard in AD; a real `tauri-plugin-opener`
   lands with AF packaging (capability addition).
 
+## Theme system, visual identity & stats (AE)
+
+### Theme model
+
+The GUI theme is a **device preference** (webview `localStorage` key
+`pakmap-theme`: `system | light | dark`, default `system`), not a repo config —
+`theme.toml` stays the TUI's per-terminal override system (ratatui style strings),
+and no shared-config fields were added (the frozen 164-test contract is untouched;
+`get_stats` composes existing lib APIs only). Inline bootstrap in `index.html`
+resolves the mode **before first paint** (no dark-flash on light-system setups);
+`data-theme` on `:root` is the CSS driver everything consumes.
+
+Tokens are two-tier (`gui/src/index.css`):
+
+- **primitives** `--pk-*` — one palette slot per value, assigned under
+  `:root, :root[data-theme=dark]` (dark = brand default, = the landing
+  `design-system/pakmap/MASTER.md` palette) and `:root[data-theme=light]`;
+- **semantic** `--color-*` — 1:1 aliases consumed by Tailwind utilities
+  (`bg-card`, `text-muted-foreground`, …), so a switch is a variable
+  reassignment, not a re-render. No hard-coded colors outside `index.css`
+  (the two translucent gradients use `color-mix` against tokens).
+
+The light scheme is an independently designed palette, **not an inversion**: accent
+text shades move two steps deeper so text/focus stay ≥ 4.5:1 (`--text-2xs` badges
+inherit the same audit):
+
+| Slot | Dark (brand) | Light (derived, AA-verified) |
+|---|---|---|
+| background / card / card-muted | `#080d17` / `#0f1728` / `#162033` | `#f1f5f9` / `#ffffff` / `#e9eef6` |
+| foreground / muted-foreground | `#f1f5f9` / `#94a3b8` | `#0f172a` / `#475569` |
+| border | `#2a3a55` | `#cbd6e4` |
+| accent (text-safe) | `#22c55e` | `#166534` |
+| accent-secondary | `#38bdf8` | `#075985` |
+| accent-tertiary | `#a78bfa` | `#6d28d9` |
+| destructive | `#ef4444` | `#b91c1c` |
+| `*-strong` solid fills | unchanged both themes — white-on-`#7c3aed` / `#b91c1c` is theme-independent |
+
+TUI token correspondence (mapping, not coupling): `--accent` ↔ `theme.toml`
+`repo_local`/`repo_extra` (green family), `--accent-tertiary` ↔ `repo_aur`
+(magenta → violet light-safe shade), `--destructive` ↔ `border_error` (red
+family), `highlight_*` → focus/selection styling.
+
+### Toggle, motion, typography
+
+- `ThemeToggle` (header, every tab): `radiogroup` with roving focus
+  (`radiogroup` semantics: system/light/dark, arrow-key roaming, `aria-checked`),
+  system option spelled out ("Follow system theme").
+- Motion: streaming `row-in` (AC) plus `banner-in`, `modal-in`, skeleton
+  shimmer — all keyframes live inside `@media (prefers-reduced-motion:
+  no-preference)`; skeletons swap to a static opacity under `reduce`. The 160 ms
+  body color transition is `.theme-anim`-scoped to *switches only* — on first
+  paint it animated the whole body from its initial state (caught by the new
+  e2e token check, hence the assertion reads the `--pk-*` token, not a sampled
+  computed color).
+- Typography scale gained named dense steps — `--text-2xs` (10 px micro
+  badges/chips), `--text-nano` (11 px dense rows/hints) — and the body's 13 px
+  stays the deliberate dense-tool exception (rest is Tailwind's ladder). Every
+  arbitrary `text-[10–12px]` across components was replaced with the scale
+  tokens; none remain.
+
+### Brand & icons
+
+`BrandMark` (`gui/src/components/BrandMark.tsx`) — chunky lowercase "p" whose
+bowl carries a map-pin notch, sky "package" dot, on the `#080d17` tile. Same
+geometry lives in `gui/src-tauri/icons/pakmap-logo.svg`; the shipped PNG set is
+regenerated from it via `rsvg-convert` (commands are in the SVG header comment):
+`32x32.png` / `128x128.png` / `128x128@2x.png` / `icon.png` (512) — Windows/mac
+bundles remain out of scope (v0.9). The empty state now opens with the mark.
+
+### Stats surface
+
+`get_stats` returns `GuiStats`: the lib's `SysStats` (`--stats` parity: explicit/
+dependencies split, orphans, per-source update counts, cache bytes) plus
+pre-formatted cache strings via `lib::stats::human_bytes`. AUR count comes from
+the existing 5-min update memo, flatpak count from the cached installed list —
+no new network work. Rendered as an additive chip row on the Updates tab
+(fail-open: a stats failure never blocks the updates list).
+
 ## Testing strategy (cross-phase)
 
 | Layer | Tooling | Guards |
 |---|---|---|
 | Core lib | existing 164 tests | frozen contract, untouched |
 | Tauri commands | Rust unit tests in `gui/src-tauri` (8: DTO full-field map, stage-name mirror, fail-open parse + AD: failure-matrix classification, keyof wire tagged unions, name guard, makepkg-artifact glob) | this contract |
-| Stream reducer | vitest (15: 5 search staged protocol + 10 ops) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests); ops: terminal-once semantics, ring cap, wrong-id guard, canceling copy |
-| E2E smoke | Playwright dev-browser battery (`pnpm e2e`), 25 specs | search: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; AD: tablist semantics, updates both-legs render, confirm → progress → done → dismiss, cancel → `op_canceled`, classified failure card, news intervention banner; axe scans: empty/done/detail/error/dialog + updates/news/confirm-dialog/failed-banner states; local gate in AC/AD (CI wiring pending container browser deps), revisit in AF |
-| Accessibility | axe-core scans (`e2e/a11y.spec.ts`) over 5 key states — empty/done/detail/error/modal | zero violations (wcag 2.1 A/AA); violations fail the battery |
+| Stream reducer | vitest (23: 5 search staged protocol + 10 ops + 8 theme hook) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests); ops: terminal-once semantics, ring cap, wrong-id guard, canceling copy; theme: boot resolution, pin-beats-OS, live system-follow listener |
+| E2E smoke | Playwright dev-browser battery (`pnpm e2e`), 32 specs | search: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; AD: tablist semantics, updates both-legs render, confirm → progress → done → dismiss, cancel → `op_canceled`, classified failure card, news intervention banner; AE: theme boot/toggle/persistence/system-follow + light-token check (`e2e/theme.spec.ts`, with `emulateMedia`); axe scans: empty/done/detail/error/dialog + updates/news/confirm-dialog/failed-banner states; local gate in AC/AD/AE (CI wiring pending container browser deps), revisit in AF |
+| Accessibility | axe-core scans (`e2e/a11y.spec.ts`) — 12 scans: 9 key states in the dark brand default **+ 3 light-scheme scans** (empty, list+detail, failed banner) | zero violations (wcag 2.1 A/AA); violations fail the battery; scans pin the theme explicitly (Playwright's default color scheme is light — an unpinned boot would silently flip semantics) |
 
 ## CI integration
 

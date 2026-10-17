@@ -24,19 +24,19 @@ export function ConfirmDialog({
   return (
     <ModalDialog label={spec.title} onClose={onClose}>
       <h2 className="mb-3 text-sm font-semibold">{spec.title}</h2>
-      <div className="space-y-1.5 text-[12px] text-muted-foreground">
+      <div className="space-y-1.5 text-xs text-muted-foreground">
         {spec.body.map((line, i) => (
           <p key={i}>{line}</p>
         ))}
       </div>
       <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-2xs text-muted-foreground">
           <kbd>Esc</kbd> cancels
         </span>        <div className="flex gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded border border-border px-3 py-1.5 text-[12px] text-foreground transition-colors hover:bg-card-muted"
+            className="cursor-pointer rounded border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-card-muted"
           >
             Cancel
           </button>
@@ -44,7 +44,7 @@ export function ConfirmDialog({
             type="button"
             data-autofocus
             onClick={onConfirm}
-            className={`cursor-pointer rounded px-3 py-1.5 text-[12px] font-semibold text-white transition-colors ${
+            className={`cursor-pointer rounded px-3 py-1.5 text-xs font-semibold text-white transition-colors ${
               spec.danger
                 ? "bg-destructive-strong hover:bg-destructive/90"
                 : "bg-accent-tertiary-strong hover:bg-accent-tertiary/90"

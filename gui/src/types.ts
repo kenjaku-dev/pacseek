@@ -125,3 +125,18 @@ export interface ConfigFlags {
   readonly: boolean;
   flatpak_enabled: boolean;
 }
+
+/** TUI --stats parity; cache sizes pre-formatted by the backend. */
+export interface StatsDto {
+  explicit: number;
+  dependencies: number;
+  orphans: number;
+  updates_repo: number;
+  updates_aur: number;
+  updates_flatpak: number;
+  flatpak_installed: number;
+  cache_pacman_bytes: number;
+  cache_pakmap_bytes: number;
+  cache_pacman_fmt: string;
+  cache_pakmap_fmt: string;
+}

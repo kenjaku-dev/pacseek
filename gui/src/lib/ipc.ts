@@ -15,6 +15,7 @@ import type {
   PackageDto,
   SearchEvent,
   SearchFilters,
+  StatsDto,
   UpdatesResult,
 } from "../types";
 
@@ -74,6 +75,10 @@ export function getUpdates(): Promise<UpdatesResult> {
 
 export function getNews(): Promise<NewsItemDto[]> {
   return gw.getNews();
+}
+
+export function getStats(): Promise<StatsDto> {
+  return gw.getStats();
 }
 
 /** normalizeGuiError is re-exported above — shared by both gateways. */

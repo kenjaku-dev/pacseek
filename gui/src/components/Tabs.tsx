@@ -55,7 +55,7 @@ export function Tabs({
           aria-controls={`panel-${t.id}`}
           tabIndex={active === t.id ? 0 : -1}
           onClick={() => onChange(t.id)}
-          className={`cursor-pointer border-b-2 px-3 py-1.5 text-[12px] transition-colors ${
+          className={`cursor-pointer border-b-2 px-3 py-1.5 text-xs transition-colors ${
             active === t.id
               ? "border-foreground font-semibold text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground"

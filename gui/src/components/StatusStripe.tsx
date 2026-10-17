@@ -24,7 +24,7 @@ export function StatusStripe({ state }: { state: SearchState }) {
     <footer
       role="status"
       aria-live="polite"
-      className="flex h-8 items-center justify-between gap-4 border-t border-border bg-card px-4 text-[11px] text-muted-foreground"
+      className="flex h-8 items-center justify-between gap-4 border-t border-border bg-card px-4 text-nano text-muted-foreground"
     >
       <span className="truncate">{text}</span>
       <span className="shrink-0 tabular-nums">

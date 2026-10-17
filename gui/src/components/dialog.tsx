@@ -69,7 +69,7 @@ export function ModalDialog({
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        className="relative max-w-full rounded-xl border border-border bg-card p-5 shadow-xl outline-none"
+        className="modal-in relative max-w-full rounded-xl border border-border bg-card p-5 shadow-xl outline-none"
         style={{ width: wide ? "34rem" : "24rem" }}
       >
         <button

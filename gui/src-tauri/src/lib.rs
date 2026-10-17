@@ -263,6 +263,51 @@ fn get_news() -> Vec<pakmap::news::NewsItem> {
     pakmap::news::fetch_arch_news(&cfg)
 }
 
+// ---------------------------------------------------------------------------
+// AE surface
+// ---------------------------------------------------------------------------
+
+/// Status-bar counters for the Updates tab header (TUI `--stats` parity).
+/// Local-only + the AUR memo (5 min) — no extra network chatty.
+#[derive(Serialize)]
+pub struct GuiStats {
+    pub explicit: usize,
+    pub dependencies: usize,
+    pub orphans: usize,
+    pub updates_repo: usize,
+    pub updates_aur: usize,
+    pub updates_flatpak: usize,
+    pub flatpak_installed: usize,
+    pub cache_pacman_bytes: u64,
+    pub cache_pakmap_bytes: u64,
+    /// pre-formatted via the lib's `human_bytes` (no float noise ported)
+    pub cache_pacman_fmt: String,
+    pub cache_pakmap_fmt: String,
+}
+
+#[tauri::command]
+fn get_stats() -> GuiStats {
+    let cfg = pakmap::config::Config::load();
+    let mut s = pakmap::stats::gather_local_stats();
+    s.updates_aur = pakmap::updates::check_aur_updates_blocking_cached(&cfg).len();
+    s.flatpak_installed = pakmap::sources::flatpak::list_installed_cached()
+        .map(|v| v.len())
+        .unwrap_or(0);
+    GuiStats {
+        explicit: s.explicit,
+        dependencies: s.dependencies,
+        orphans: s.orphans,
+        updates_repo: s.updates_repo,
+        updates_aur: s.updates_aur,
+        updates_flatpak: s.updates_flatpak,
+        flatpak_installed: s.flatpak_installed,
+        cache_pacman_bytes: s.cache_pacman_bytes,
+        cache_pakmap_bytes: s.cache_pakmap_bytes,
+        cache_pacman_fmt: pakmap::stats::human_bytes(s.cache_pacman_bytes),
+        cache_pakmap_fmt: pakmap::stats::human_bytes(s.cache_pakmap_bytes),
+    }
+}
+
 /// Detail resolution for a selected row: for installed packages this resolves
 /// the dependency/reason metadata through the localdb fast path; remote rows
 /// carry their info in the streamed `Package` already (votes, popularity,
@@ -485,7 +530,8 @@ pub fn run() {
             drop_operation,
             get_config_flags,
             get_updates,
-            get_news
+            get_news,
+            get_stats
         ])
         .run(tauri::generate_context!())
     {

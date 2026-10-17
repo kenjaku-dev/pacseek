@@ -42,7 +42,7 @@ export function StagedResults({ state, selected, onSelect, listRef }: StagedResu
   return (
     <div className="flex-1 overflow-auto p-4" ref={listRef}>
       {state.query === "" && rows.length > 0 && (
-        <p className="mb-3 text-[11px] text-muted-foreground">
+        <p className="mb-3 text-nano text-muted-foreground">
           Showing a filtered view of the current run — type a query to stream all sources.
         </p>
       )}
@@ -55,12 +55,12 @@ export function StagedResults({ state, selected, onSelect, listRef }: StagedResu
         return (
           <section key={leg} aria-label={`${LEG_META[leg].title} results`}>
             <header className="flex items-center gap-2 px-1 pt-3 pb-1.5 first:pt-0">
-              <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${LEG_META[leg].tone}`}>
+              <h3 className={`text-nano font-semibold uppercase tracking-wider ${LEG_META[leg].tone}`}>
                 {LEG_META[leg].title}
               </h3>
               <span
                 data-testid={`count-${leg}`}
-                className="min-w-7 rounded bg-card-muted px-1.5 text-center text-[10px] text-muted-foreground"
+                className="min-w-7 rounded bg-card-muted px-1.5 text-center text-2xs text-muted-foreground"
               >
                 {pkgs === null ? "…" : String(pkgs.length)}
               </span>
@@ -81,7 +81,7 @@ export function StagedResults({ state, selected, onSelect, listRef }: StagedResu
             </div>
 
             {pkgs !== null && pkgs.length === 0 && (
-              <p className="px-1 py-1.5 text-[11px] text-muted-foreground">
+              <p className="px-1 py-1.5 text-nano text-muted-foreground">
                 {leg === "flatpak" ? "no flatpak results (or flatpak disabled)" : "nothing found"}
               </p>
             )}
@@ -90,7 +90,7 @@ export function StagedResults({ state, selected, onSelect, listRef }: StagedResu
       })}
 
       {rows.length === 0 && state.query !== "" && state.done && (
-        <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2.5 text-[12px] text-muted-foreground">
+        <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2.5 text-xs text-muted-foreground">
           Nothing matches “{state.query}” — try fewer filters or a shorter query.
         </p>
       )}
@@ -99,5 +99,5 @@ export function StagedResults({ state, selected, onSelect, listRef }: StagedResu
 }
 
 function SkeletonLine() {
-  return <span className="h-2 w-24 animate-pulse rounded bg-card-muted" />;
+  return <span className="skeleton h-2 w-24 rounded" />;
 }

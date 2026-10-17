@@ -34,7 +34,7 @@ function Chip({
       title={hint}
       onClick={onClick}
       className={
-        "h-6 cursor-pointer rounded-full border px-3 text-[11px] transition-colors " +
+        "h-6 cursor-pointer rounded-full border px-3 text-nano transition-colors " +
         (pressed
           ? "border-accent bg-accent/15 text-accent"
           : "border-border text-muted-foreground hover:border-accent-secondary/60 hover:text-foreground")
@@ -63,7 +63,7 @@ export function FilterBar({ filters, flatpakAvailable, onSource, onToggle }: Fil
               aria-pressed={filters.source === s.id}
               onClick={() => onSource(s.id)}
               className={
-                "h-6 cursor-pointer rounded-md px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 " +
+                "h-6 cursor-pointer rounded-md px-2.5 text-nano transition-colors disabled:cursor-not-allowed disabled:opacity-40 " +
                 (filters.source === s.id
                   ? "bg-accent-secondary/20 text-accent-secondary"
                   : "text-muted-foreground hover:text-foreground")

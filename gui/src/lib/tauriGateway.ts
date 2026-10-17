@@ -10,6 +10,7 @@ import type {
   PackageDto,
   SearchEvent,
   SearchFilters,
+  StatsDto,
   UpdatesResult,
 } from "../types";
 
@@ -90,6 +91,10 @@ export async function getUpdates(): Promise<UpdatesResult> {
 
 export async function getNews(): Promise<NewsItemDto[]> {
   return invoke<NewsItemDto[]>("get_news");
+}
+
+export function getStats(): Promise<StatsDto> {
+  return invoke<StatsDto>("get_stats");
 }
 
 export function normalizeGuiError(err: unknown): GuiError {

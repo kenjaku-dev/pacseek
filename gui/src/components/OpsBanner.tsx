@@ -30,7 +30,8 @@ export function OpsBanner({
       role="status"
       aria-live="polite"
       aria-label={running ? "Operation progress" : "Operation result"}
-      className="border-t border-border bg-card px-4 py-2"
+      data-testid="ops-banner"
+      className="banner-in border-t border-border bg-card px-4 py-2"
     >
       <div className="flex items-center gap-3">
         {running ? (
@@ -48,22 +49,22 @@ export function OpsBanner({
           </span>
         )}
 
-        <span className="max-w-40 shrink-0 truncate text-[12px] font-semibold text-foreground">
+        <span className="max-w-40 shrink-0 truncate text-xs font-semibold text-foreground">
           {op.label}
         </span>
 
-        <span className="shrink-0 rounded bg-card-muted px-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="shrink-0 rounded bg-card-muted px-1.5 text-2xs uppercase tracking-wide text-muted-foreground">
           {op.phase}
         </span>
 
         {running ? (
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate text-nano text-muted-foreground">
             {op.status === "canceling"
               ? "canceling before the next phase — the running transaction is never killed mid-flight"
               : lastLine}
           </span>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-[11px]">
+          <span className="min-w-0 flex-1 truncate text-nano">
             {op.status === "ok" ? (
               <span className="text-muted-foreground">
                 done{op.exit_code !== null ? ` (exit ${op.exit_code})` : ""} — remember to re-search
@@ -86,7 +87,7 @@ export function OpsBanner({
             type="button"
             onClick={onCancel}
             disabled={op.status === "canceling"}
-            className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+            className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-nano text-foreground transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
           >
             Cancel
           </button>
@@ -107,7 +108,7 @@ export function OpsBanner({
       </div>
 
       {op.status === "failed" && !running && (
-        <p className="mt-0.5 text-[10px] text-muted-foreground">
+        <p className="mt-0.5 text-2xs text-muted-foreground">
           exit code {op.exit_code ?? "none"} · the transaction was never killed mid-flight ·
           classified from the operation journal
         </p>
@@ -132,7 +133,7 @@ function JournalToggle({ lines, running }: { lines: string[]; running: boolean }
       {open && (
         <pre
           data-testid="op-journal"
-          className="mt-2 max-h-40 overflow-y-auto rounded bg-card-muted p-2 text-left text-[10px] leading-4 text-muted-foreground"
+          className="mt-2 max-h-40 overflow-y-auto rounded bg-card-muted p-2 text-left text-2xs leading-4 text-muted-foreground"
         >
           {lines.join("\n")}
           {running && "\n…"}

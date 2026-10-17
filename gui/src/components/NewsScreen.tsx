@@ -33,7 +33,7 @@ export function NewsScreen() {
   if (error !== null) {
     return (
       <div className="p-4">
-        <div role="alert" className="bg-destructive/10 px-4 py-2.5 text-[12px]">
+        <div role="alert" className="bg-destructive/10 px-4 py-2.5 text-xs">
           <span className="font-semibold text-destructive">news_failed</span>{" "}
           <span>{error}</span>
         </div>
@@ -43,7 +43,7 @@ export function NewsScreen() {
   if (items === null) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p role="status" className="text-[12px] text-muted-foreground">
+        <p role="status" className="text-xs text-muted-foreground">
           Fetching Arch news…
         </p>
       </div>
@@ -59,10 +59,10 @@ export function NewsScreen() {
           role="alert"
           className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5"
         >
-          <p className="text-[12px] font-semibold text-destructive">
+          <p className="text-xs font-semibold text-destructive">
             Manual intervention required before upgrading
           </p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
+          <p className="mt-0.5 text-nano text-muted-foreground">
             {interventions.length} item(s) below describe steps you must take yourself — read
             them before running "Upgrade all".
           </p>
@@ -74,15 +74,15 @@ export function NewsScreen() {
           <li key={item.link} className="py-2.5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[12px] font-medium leading-snug">
+                <p className="text-xs font-medium leading-snug">
                   {item.title}
                   {item.needs_action && (
-                    <span className="ml-2 rounded bg-destructive/15 px-1.5 py-0.5 align-middle text-[10px] text-destructive">
+                    <span className="ml-2 rounded bg-destructive/15 px-1.5 py-0.5 align-middle text-2xs text-destructive">
                       [ACTION REQUIRED]
                     </span>
                   )}
                 </p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                <p className="mt-0.5 text-2xs text-muted-foreground">
                   {item.pub_date ?? "unknown date"}
                 </p>
               </div>
@@ -90,7 +90,7 @@ export function NewsScreen() {
                 type="button"
                 aria-label={`Copy link to news item: ${item.title}`}
                 onClick={() => void navigator.clipboard.writeText(item.link)}
-                className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-card-muted hover:text-foreground"
+                className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-card-muted hover:text-foreground"
               >
                 Copy link
               </button>
@@ -100,7 +100,7 @@ export function NewsScreen() {
       </ul>
 
       {items.length === 0 && (
-        <p className="mt-8 text-center text-[12px] text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-muted-foreground">
           No news items available right now.
         </p>
       )}

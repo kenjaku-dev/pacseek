@@ -39,13 +39,13 @@ export function ResultRow({ rowKey, leg, pkg, selected, onSelect }: ResultRowPro
       <span className="min-w-44 truncate font-medium text-foreground">{pkg.name}</span>
       <span className="min-w-20 shrink-0 text-muted-foreground">{pkg.version}</span>
       <span
-        className={`shrink-0 rounded bg-card-muted px-1.5 text-[10px] uppercase tracking-wider ${LEG_TONE[leg]}`}
+        className={`shrink-0 rounded bg-card-muted px-1.5 text-2xs uppercase tracking-wider ${LEG_TONE[leg]}`}
       >
         {pkg.repo}
       </span>
-      {pkg.installed && <span className="shrink-0 text-[10px] text-accent">[installed]</span>}
+      {pkg.installed && <span className="shrink-0 text-2xs text-accent">[installed]</span>}
       {badges.length > 0 && (
-        <span className="shrink-0 text-[10px] text-destructive">[{badges.join("][")}]</span>
+        <span className="shrink-0 text-2xs text-destructive">[{badges.join("][")}]</span>
       )}
       <span className="truncate text-muted-foreground">{pkg.description ?? ""}</span>
     </div>

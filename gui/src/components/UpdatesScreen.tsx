@@ -4,8 +4,8 @@
 // (the TUI's semantics); per-row update runs the single-package install op.
 // Orphan removal rides on the same screen (batch, count from get_updates).
 import { useEffect, useState } from "react";
-import { getUpdates, normalizeGuiError } from "../lib/ipc";
-import type { OpRequest, UpdatesResult } from "../types";
+import { getStats, getUpdates, normalizeGuiError } from "../lib/ipc";
+import type { OpRequest, StatsDto, UpdatesResult } from "../types";
 import { ErrorCard } from "./ErrorCard";
 import { QuickHint } from "./states";
 
@@ -17,6 +17,7 @@ export interface UpdatesApi {
 
 export function UpdatesScreen({ api }: { api: UpdatesApi }) {
   const [data, setData] = useState<UpdatesResult | null>(null);
+  const [stats, setStats] = useState<StatsDto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,6 +31,13 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
       .catch((e) => {
         if (live) setError(normalizeGuiError(e).message);
       });
+    getStats()
+      .then((s) => {
+        if (live) setStats(s);
+      })
+      .catch(() => {
+        /* the chip row is additive — stats failing never blocks updates */
+      });
     return () => {
       live = false;
     };
@@ -41,7 +49,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
   if (data === null) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p role="status" className="text-[12px] text-muted-foreground">
+        <p role="status" className="text-xs text-muted-foreground">
           Checking for updates…
         </p>
       </div>
@@ -75,7 +83,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
                 },
               )
             }
-            className="cursor-pointer rounded bg-destructive-strong px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-destructive/90 disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded bg-destructive-strong px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-destructive/90 disabled:cursor-default disabled:opacity-50"
           >
             Upgrade all ({total})
           </button>
@@ -92,7 +100,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
                 },
               )
             }
-            className="cursor-pointer rounded border border-border px-3 py-1.5 text-[12px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded border border-border px-3 py-1.5 text-xs transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
           >
             Refresh dbs
           </button>
@@ -114,7 +122,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
                   },
                 )
               }
-              className="cursor-pointer rounded border border-destructive/50 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
+              className="cursor-pointer rounded border border-destructive/50 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
             >
               Remove orphans ({data.orphans.length})
             </button>
@@ -135,7 +143,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
                 },
               )
             }
-            className="cursor-pointer rounded border border-border px-3 py-1.5 text-[12px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded border border-border px-3 py-1.5 text-xs transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
           >
             Clean cache
           </button>
@@ -144,6 +152,43 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
 
       {ro && (
         <QuickHint text="readonly mode is enabled — mutating actions are disabled (behavior.readonly in ~/.config/pakmap/config.toml)" />
+      )}
+
+      {stats !== null && (
+        <div
+          data-testid="stats-chips"
+          className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-nano text-muted-foreground"
+          aria-label="System statistics"
+        >
+          <span>
+            installed{" "}
+            <span className="text-foreground" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {stats.explicit + stats.dependencies}
+            </span>{" "}
+            <span aria-hidden="true">·</span>{" "}
+            <span className="text-muted-foreground">
+              {stats.explicit} explicit / {stats.dependencies} deps
+            </span>
+          </span>
+          <span aria-hidden="true" className="text-border">
+            │
+          </span>
+          <span>
+            flatpak{" "}
+            <span className="text-foreground" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {stats.flatpak_installed}
+            </span>
+          </span>
+          <span aria-hidden="true" className="text-border">
+            │
+          </span>
+          <span>
+            pacman cache{" "}
+            <span className="text-foreground" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {stats.cache_pacman_fmt}
+            </span>
+          </span>
+        </div>
       )}
 
       {data.repo_err !== null && (
@@ -155,24 +200,24 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
 
       {data.repo.length > 0 && (
         <section>
-          <h3 className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h3 className="mb-1.5 mt-4 text-nano font-semibold uppercase tracking-wider text-muted-foreground">
             Official repositories <span className="ml-1 normal-case">{data.repo.length}</span>
           </h3>
           <ul role="list" aria-label="Official repository updates" className="divide-y divide-border/60">
             {data.repo.map((u) => (
               <li key={u.name} className="flex items-center justify-between gap-3 py-2">
                 <span className="min-w-0">
-                  <span className="block truncate text-[12px] font-medium">{u.name}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="block truncate text-xs font-medium">{u.name}</span>
+                  <span className="text-2xs text-muted-foreground">
                     {u.old_version} → {u.new_version}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <span className="rounded bg-accent-tertiary/15 px-1.5 py-0.5 text-[10px] text-accent-tertiary">
+                  <span className="rounded bg-accent-tertiary/15 px-1.5 py-0.5 text-2xs text-accent-tertiary">
                     [{u.repo === "aur" ? "AUR" : u.repo.toUpperCase()}]
                   </span>
                   {u.out_of_date && (
-                    <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">
+                    <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-2xs text-destructive">
                       [OOD]
                     </span>
                   )}
@@ -192,7 +237,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
                         },
                       )
                     }
-                    className="cursor-pointer rounded border border-border px-2 py-0.5 text-[11px] transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
+                    className="cursor-pointer rounded border border-border px-2 py-0.5 text-nano transition-colors hover:bg-card-muted disabled:cursor-default disabled:opacity-50"
                   >
                     Update
                   </button>
@@ -205,19 +250,19 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
 
       {data.aur.length > 0 && (
         <section>
-          <h3 className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h3 className="mb-1.5 mt-4 text-nano font-semibold uppercase tracking-wider text-muted-foreground">
             AUR <span className="ml-1 normal-case">{data.aur.length}</span>
           </h3>
           <ul role="list" aria-label="AUR updates" className="divide-y divide-border/60">
             {data.aur.map((u) => (
               <li key={u.name} className="flex items-center justify-between gap-3 py-2">
                 <span className="min-w-0">
-                  <span className="block truncate text-[12px] font-medium">{u.name}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="block truncate text-xs font-medium">{u.name}</span>
+                  <span className="text-2xs text-muted-foreground">
                     {u.old_version} → {u.new_version}
                   </span>
                 </span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
+                <span className="shrink-0 text-2xs text-muted-foreground">
                   update via search & detail pane (AUR builds run per package)
                 </span>
               </li>
@@ -227,7 +272,7 @@ export function UpdatesScreen({ api }: { api: UpdatesApi }) {
       )}
 
       {total === 0 && (
-        <p className="mt-8 text-center text-[12px] text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-muted-foreground">
           Everything is up to date. Run Refresh dbs after a config/mirror change.
         </p>
       )}

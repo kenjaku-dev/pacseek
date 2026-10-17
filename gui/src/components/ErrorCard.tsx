@@ -7,11 +7,11 @@ export function ErrorCard({ code, message, hint }: { code: string; message: stri
       className="flex items-start gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2.5"
     >
       <div className="min-w-0">
-        <p className="text-[12px]">
+        <p className="text-xs">
           <span className="font-semibold text-destructive">{code}</span>{" "}
           <span className="text-foreground">{message}</span>
         </p>
-        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">hint: {hint}</p>}
+        {hint && <p className="mt-0.5 text-nano text-muted-foreground">hint: {hint}</p>}
       </div>
     </div>
   );

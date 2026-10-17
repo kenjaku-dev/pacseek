@@ -1,36 +1,101 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — mapped from pakmap-landing design-system MASTER.md
- * (`design-system/pakmap/MASTER.md`, synced 2026-10-16 with the shipped
- * globals.css). Language tokens live in AE; these values are the single
- * source until theme.toml mapping lands. No other hard-coded colors.
+ * Design tokens — AE theme system.
+ *
+ * Architecture (color-theory two-tier rule):
+ *   - primitive tokens `--pk-*`  : the palette slots, one value per theme;
+ *     assigned under `:root` (dark = brand default) and
+ *     `:root[data-theme="light"]`;
+ *   - semantic tokens `--color-*`: consumed by Tailwind utilities (bg-card,
+ *     text-muted-foreground, …). They are 1:1 aliases of the slots, so the
+ *     components never re-declare colors and a theme switch is a variable
+ *     reassignment, not a re-render.
+ *
+ * Sources of truth:
+ *   - dark palette = pakmap-landing design-system MASTER.md (synced 2026-10-16);
+ *   - light palette = AE (derived for WCAG 2.1 AA — see the table in
+ *     docs/gui-architecture.md §theme system);
+ *   - TUI theme correspondence: accent ↔ theme.toml repo_local/repo_extra
+ *     (green family), accent-tertiary ↔ repo_aur (magenta→violet, light-safe
+ *     shade), destructive ↔ border_error (red family). theme.toml itself stays
+ *     a TUI-surface override system (ratatui style strings); the GUI theme is
+ *     a device preference in localStorage ("pakmap-theme": system|light|dark).
+ *
+ * No hard-coded colors outside this file — the two rgba() gradients below
+ * use color-mix against tokens.
  */
+
 @theme {
-  --color-background: #080d17;
-  --color-primary: #1e293b;
-  --color-secondary: #334155;
-  --color-card: #0f1728;
-  --color-card-muted: #162033;
-  --color-foreground: #f1f5f9;
-  --color-muted-foreground: #94a3b8;
-  --color-border: #2a3a55;
-  --color-accent: #22c55e;
-  --color-on-accent: #07131f;
-  --color-accent-secondary: #38bdf8;
-  --color-accent-tertiary: #a78bfa;
-  /* darker accent for solid fills under white text (WCAG AA ≥ 4.5:1) */
-  --color-accent-tertiary-strong: #7c3aed;
-  --color-destructive: #ef4444;
-  /* darker destructive for solid fills under white text (WCAG AA ≥ 4.5:1) */
-  --color-destructive-strong: #b91c1c;
+  --color-background: var(--pk-background);
+  --color-primary: var(--pk-primary);
+  --color-secondary: var(--pk-secondary);
+  --color-card: var(--pk-card);
+  --color-card-muted: var(--pk-card-muted);
+  --color-foreground: var(--pk-foreground);
+  --color-muted-foreground: var(--pk-muted-foreground);
+  --color-border: var(--pk-border);
+  --color-accent: var(--pk-accent);
+  --color-on-accent: var(--pk-on-accent);
+  --color-accent-secondary: var(--pk-accent-secondary);
+  --color-accent-tertiary: var(--pk-accent-tertiary);
+  /* solid-fill shades — AA-safe under white text in BOTH themes */
+  --color-accent-tertiary-strong: var(--pk-accent-tertiary-strong);
+  --color-destructive: var(--pk-destructive);
+  --color-destructive-strong: var(--pk-destructive-strong);
+
+  /* AE typography scale — named dense steps stop the arbitrary-text sprawl */
+  --text-2xs: 0.625rem;        /* 10px micro badges/chips */
+  --text-2xs--line-height: 1.4;
+  --text-nano: 0.6875rem;      /* 11px dense rows/hints */
+  --text-nano--line-height: 1.45;
 
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
     Consolas, "Liberation Mono", monospace;
 }
 
-:root {
+/* dark = the brand's native scheme (landing MASTER palette) */
+:root,
+:root[data-theme="dark"] {
+  --pk-background: #080d17;
+  --pk-primary: #1e293b;
+  --pk-secondary: #334155;
+  --pk-card: #0f1728;
+  --pk-card-muted: #162033;
+  --pk-foreground: #f1f5f9;
+  --pk-muted-foreground: #94a3b8;
+  --pk-border: #2a3a55;
+  --pk-accent: #22c55e;
+  --pk-on-accent: #07131f;
+  --pk-accent-secondary: #38bdf8;
+  --pk-accent-tertiary: #a78bfa;
+  --pk-accent-tertiary-strong: #7c3aed;
+  --pk-destructive: #ef4444;
+  --pk-destructive-strong: #b91c1c;
+
   color-scheme: dark;
+}
+
+/* light = independently designed scheme, NOT an inversion (color-theory rule):
+ * accent text shades move two steps deeper so text/focus stay ≥ 4.5:1 */
+:root[data-theme="light"] {
+  --pk-background: #f1f5f9;
+  --pk-primary: #e2e8f0;
+  --pk-secondary: #cdd8e6;
+  --pk-card: #ffffff;
+  --pk-card-muted: #e9eef6;
+  --pk-foreground: #0f172a;
+  --pk-muted-foreground: #475569;
+  --pk-border: #cbd6e4;
+  --pk-accent: #166534;
+  --pk-on-accent: #f8fafc;
+  --pk-accent-secondary: #075985;
+  --pk-accent-tertiary: #6d28d9;
+  --pk-accent-tertiary-strong: #7c3aed;
+  --pk-destructive: #b91c1c;
+  --pk-destructive-strong: #b91c1c;
+
+  color-scheme: light;
 }
 
 body {
@@ -44,9 +109,9 @@ body {
 }
 
 /*
- * Row insertion fade for streaming results — the only motion in AC, and it
- * respects prefers-reduced-motion per the
-design-system rules.
+ * Motion pass (AE): small, purposeful, and entirely under
+ * prefers-reduced-motion — no motion is the default for sensitive users.
+ * Streaming rows already fade via .row-in (AC).
  */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes row-in {
@@ -57,8 +122,77 @@ design-system rules.
       opacity: 1;
     }
   }
-  .row-in {
-    animation: row-in 150ms ease-out;
+
+  @keyframes banner-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  .banner-in {
+    animation: banner-in 180ms ease-out;
+  }
+
+  .modal-in {
+    animation: modal-in 120ms ease-out;
+  }
+
+  /* theme-switch smoothing, scoped to switches only (never first paint) */
+  .theme-anim body {
+    transition: background-color 160ms ease, color 160ms ease;
+  }
+
+  /* skeleton placeholder with a calm directional shimmer */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: color-mix(in oklab, var(--color-foreground) 6%, transparent);
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--color-foreground) 8%, transparent),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.2s linear infinite;
+  }
+}
+
+/* reduced motion: skeletons breathe by opacity instead of sliding light */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    opacity: 0.75;
   }
 }
 
