@@ -1,0 +1,7 @@
+# pnpm 12 settings home (the `pnpm` key in package.json is legacy and
+# `onlyBuiltDependencies` was renamed to `allowBuilds` in pnpm 11/12 —
+# CI hit ERR_PNPM_IGNORED_BUILDS on esbuild's install script).
+# esbuild validates its prebuilt binary in postinstall; no other dep runs
+# build scripts (tauri/tailwind ship via prebuilt optional dependencies).
+allowBuilds:
+  - esbuild
