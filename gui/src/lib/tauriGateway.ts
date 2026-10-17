@@ -1,5 +1,6 @@
 // Real IPC gateway — the only place `invoke`/`Channel` are touched.
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   ConfigFlags,
   ConfigSummary,
@@ -95,6 +96,15 @@ export async function getNews(): Promise<NewsItemDto[]> {
 
 export function getStats(): Promise<StatsDto> {
   return invoke<StatsDto>("get_stats");
+}
+
+/**
+ * Open an external URL in the system browser (AF: `tauri-plugin-opener`,
+ * capability-granted for URLs only — no paths). The webview itself blocks
+ * navigation, so external pages must go through the OS.
+ */
+export async function openExternal(url: string): Promise<void> {
+  await openUrl(url);
 }
 
 export function normalizeGuiError(err: unknown): GuiError {

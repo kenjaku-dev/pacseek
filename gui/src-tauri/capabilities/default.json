@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "pakmap GUI default capabilities — core IPC only (custom commands need no extra grants)",
+  "description": "pakmap GUI default capabilities — core IPC, custom commands need no extra grants, opener restricted to URLs (news links; no filesystem paths)",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:allow-open-url"]
 }

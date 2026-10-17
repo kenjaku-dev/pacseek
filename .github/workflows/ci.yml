@@ -124,7 +124,9 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinux
           pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman nodejs npm webkit2gtk-4.1 librsvg
+          # chromium carries every shared lib playwright's downloaded browser
+          # needs (webkit2gtk drives cargo check/tauri, librsvg regenerates icons)
+          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman nodejs npm webkit2gtk-4.1 librsvg chromium
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory '*'
 
@@ -156,6 +158,17 @@ jobs:
 
       - name: Unit tests (stream reducer)
         run: pnpm --dir gui test
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playw-${{ runner.os }}-${{ hashFiles('gui/pnpm-lock.yaml') }}
+
+      - name: E2E battery (vitest-level flows + axe scans, mock gateway)
+        run: |
+          pnpm --dir gui exec playwright install chromium
+          pnpm --dir gui exec playwright test
 
       - name: Clippy (gui crate)
         run: cargo clippy -p pakmap-gui --locked --all-targets -- -D warnings

@@ -10,20 +10,22 @@ cd pakmap
 cargo install --path . --force`,
   },
   {
-    label: "Release binary",
-    command: `cargo build --release
-sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap`,
+    label: "Desktop GUI",
+    command: `git clone https://aur.archlinux.org/pakmap-gui.git
+cd pakmap-gui && makepkg -si
+# or: pakmap-gui tarball from GitHub releases`,
   },
   {
     label: "Everyday use",
     command: `pakmap                 # TUI (TTY)
+pakmap-gui             # desktop app
 pakmap firefox --no-tui  # CLI / scripts
 pakmap --init-config     # write config.toml`,
   },
 ] as const;
 
 const DEPS =
-  "Requires pacman 5.1+ (libalpm), pacman-contrib, git, base-devel for AUR builds, Rust 1.88+. Flatpak (optional) enables --source flatpak.";
+  "Requires pacman 5.1+ (libalpm), pacman-contrib, git, base-devel for AUR builds, Rust 1.90+. Flatpak (optional) enables --source flatpak. The desktop GUI additionally needs webkit2gtk-4.1 and polkit.";
 
 function CommandLine({ line }: { line: string }) {
   const hashIndex = line.indexOf("#");

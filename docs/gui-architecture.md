@@ -319,6 +319,77 @@ the existing 5-min update memo, flatpak count from the cached installed list —
 no new network work. Rendered as an additive chip row on the Updates tab
 (fail-open: a stats failure never blocks the updates list).
 
+## Packaging & release (AF)
+
+### Distribution model (deliberate, no Tauri bundling)
+
+`bundle.active` stays `false` — deb/AppImage packaging is not pursued; the GUI
+ships through three channels, all sharing one install layout
+(`usr/bin/pakmap-gui`, `usr/share/applications/pakmap-gui.desktop`,
+`usr/share/icons/hicolor/{32x32,128x128,256x256}/apps/pakmap-gui.png`):
+
+1. **AUR `pakmap-gui`** — `packaging/aur/pakmap-gui/PKGBUILD` (pretty-sourced
+   tag tarball, `pnpm install --frozen-lockfile && pnpm build && cargo build
+   --release --locked -p pakmap-gui`; publishing steps in the adjacent README).
+   Run deps: `webkit2gtk-4.1 gtk3 polkit pacman git pacman-contrib`;
+   `flatpak` optional.
+2. **GitHub release tarball** — `pakmap-gui-<v>-x86_64-linux.tar.gz`
+   (install-layout tree; `tar xzf -C /`), built by `release.yml`.
+3. **Source install** — `make gui-release && make install-gui`
+   (`install-gui-assets` is the shared layout step the PKGBUILD mirrors).
+
+`tauri.conf.json` no longer hardcodes `version` — it inherits the crate's
+(single-source, like the landing's `sync-version`).
+
+### `tauri-plugin-opener` (AF capability, least privilege)
+
+Registered on the builder; the capability grants **only**
+`opener:allow-open-url` — no `open-path` (the GUI never opens filesystem
+targets from the frontend). NewsScreen gets a real "Open" action (system
+browser via the plugin) while keeping the copy icon as a raw-URL fallback;
+the open seam is `ipc.openExternal` (mock gateway no-ops it in E2E).
+
+### CI wiring (gui job + release)
+
+- `ci.yml` gui job now runs the full Playwright battery in the Arch container:
+  the `chromium` package is installed as the **library carrier** for the
+  downloaded Playwright build (browsers cached via actions/cache), then
+  `playwright install chromium && playwright test` (32 specs, mock gateway,
+  `reuseExistingServer` disabled in CI).
+- `release.yml` builds the GUI alongside the CLI after the verify gate
+  (needs `nodejs` + pnpm/action-setup + `webkit2gtk-4.1`) and attaches
+  `pakmap-gui-<v>-x86_64-linux.tar.gz` to the GitHub release together with the
+  CLI tarball; `generate_release_notes` drafts release notes.
+
+### Runtime budgets (release, measured at v0.8.0)
+
+- Binary size: CLI **6.1M** / GUI **8.9M (9,324,048 B)** — ≤ 10M NFR holds
+  (~1.2M of the AB-spike delta is the AF opener plugin pulling zbus; opt-level
+  "z" + lto + strip handle the rest). No deb/AppImage bundles, so no further
+  bundling tax.
+- Startup: cold self-quit smoke walls **0.59s (MS=300)** – **2.28s (MS=2000)**,
+  exit 0 across 6/6 runs after AF hardening — first paint lands inside ~1.1s of
+  process start (webkit2gtk init dominating; the timer overshoot walls are the
+  self-quit timer plus ~0.2–0.7s graceful teardown).
+- Memory: main-process peak RSS **~141MB** steady (webkit2gtk webview baseline;
+  side webprocesses scale with page content but are far smaller here).
+
+### Final design audit (webdesign-review quick scope: six domains)
+
+- **accessibility** — instrumented: 12 axe scans, zero violations across both
+  themes; live regions verified (`StatusStripe`, `OpsBanner` `aria-live=polite`
+  without focus theft); dialogs trap and restore focus. Fixed in AF: the news
+  copy fallback became a 24×24 icon-button target with a lucide `Copy` glyph
+  (target-size + icon-set consistency).
+- **usability / ux** — confirm dialogs name the consequence before the action;
+  error cards carry the CLI's hint; cancel semantics are spelled out in copy;
+  readonly explains itself; empty state teaches the hotkeys. No new findings.
+- **ui / typography / color** — semantic two-tier tokens everywhere (no
+  hard-coded colors outside `index.css`), named type scale, three accents max,
+  AA verified dark and light.
+- Recommendation (deferred, v0.9): `DetailPane` URL stays inert text; opening
+  package URLs might also deserve the opener affordance.
+
 ## Testing strategy (cross-phase)
 
 | Layer | Tooling | Guards |
@@ -326,13 +397,15 @@ no new network work. Rendered as an additive chip row on the Updates tab
 | Core lib | existing 164 tests | frozen contract, untouched |
 | Tauri commands | Rust unit tests in `gui/src-tauri` (8: DTO full-field map, stage-name mirror, fail-open parse + AD: failure-matrix classification, keyof wire tagged unions, name guard, makepkg-artifact glob) | this contract |
 | Stream reducer | vitest (23: 5 search staged protocol + 10 ops + 8 theme hook) | staged protocol incl. superseded generations (mirrors the 4 TUI staged tests); ops: terminal-once semantics, ring cap, wrong-id guard, canceling copy; theme: boot resolution, pin-beats-OS, live system-follow listener |
-| E2E smoke | Playwright dev-browser battery (`pnpm e2e`), 32 specs | search: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; AD: tablist semantics, updates both-legs render, confirm → progress → done → dismiss, cancel → `op_canceled`, classified failure card, news intervention banner; AE: theme boot/toggle/persistence/system-follow + light-token check (`e2e/theme.spec.ts`, with `emulateMedia`); axe scans: empty/done/detail/error/dialog + updates/news/confirm-dialog/failed-banner states; local gate in AC/AD/AE (CI wiring pending container browser deps), revisit in AF |
+| E2E smoke | Playwright dev-browser battery (`pnpm e2e`), 32 specs | search: empty → streaming → done → detail, keyboard-complete, generation guard, error envelope, no-results, overlay below 1020px; AD: tablist semantics, updates both-legs render, confirm → progress → done → dismiss, cancel → `op_canceled`, classified failure card, news intervention banner; AE: theme boot/toggle/persistence/system-follow + light-token check (`e2e/theme.spec.ts`, with `emulateMedia`); axe scans: empty/done/detail/error/dialog + updates/news/confirm-dialog/failed-banner states | **gated in CI since AF** (Arch container: system chromium as lib carrier, cached browser) |
 | Accessibility | axe-core scans (`e2e/a11y.spec.ts`) — 12 scans: 9 key states in the dark brand default **+ 3 light-scheme scans** (empty, list+detail, failed banner) | zero violations (wcag 2.1 A/AA); violations fail the battery; scans pin the theme explicitly (Playwright's default color scheme is light — an unpinned boot would silently flip semantics) |
 
 ## CI integration
 
 Path filter `gui/**` gates a `gui` job (archlinux container: webkit2gtk-4.1, librsvg,
-node 22 + pnpm): frontend install/build (frozen lockfile), `cargo clippy -p pakmap-gui
---locked --all-targets -- -D warnings`, `cargo check -p pakmap-gui --locked`.
-`cargo fmt --all` runs in the rust job and covers the GUI crate's Rust files. The
-`ci-ok` aggregate job requires all triggered jobs green.
+chromium, node 22 + pnpm): frontend install/build (frozen lockfile), eslint, vitest,
+the **full Playwright battery** (AF), `cargo clippy -p pakmap-gui --locked
+--all-targets -- -D warnings`, `cargo check -p pakmap-gui --locked`.
+`cargo fmt --all` runs in the rust job and covers the GUI crate's Rust files.
+Tag pushes (`v*`) trigger `release.yml`: verify → CLI tarball **+ GUI tarball**
+(AF) → GitHub release. The `ci-ok` aggregate job requires all triggered jobs green.

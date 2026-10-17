@@ -45,7 +45,23 @@ cargo install --path . --force  # -> ~/.cargo/bin/pakmap (add to PATH)
 sudo pacman -Sy  # refresh sync DB before first repo search
 ```
 
-Deps: `pacman 5.1+ (libalpm 16)`, `pacman-contrib` (`pacman-conf`), `git`, `base-devel` for AUR builds, `rust 1.90+` (MSRV 1.90 — workspace-wide pin; flag GUI work in progress: `pakmap-gui` desktop app lands in v0.8.0, dep `webkit2gtk-4.1`).
+Deps: `pacman 5.1+ (libalpm 16)`, `pacman-contrib` (`pacman-conf`), `git`, `base-devel` for AUR builds, `rust 1.90+` (MSRV 1.90 — workspace-wide pin).
+
+### Desktop GUI (`pakmap-gui`, v0.8.0)
+
+The Tauri companion app: same staged search across pacman/AUR/Flatpak, Updates tab (upgrade-all in one transaction), orphans + cache cleanup, Arch-news intervention banner — unprivileged; pacman/paccache flows go through `pkexec` (the polkit dialog is the confirmation, `--noconfirm` otherwise — no TTY in a GUI).
+
+```bash
+# from source:
+make gui-release                            # frontend dist + release binary
+sudo make install-gui                       # binary + .desktop + hicolor icons
+# or AUR:
+git clone https://aur.archlinux.org/pakmap-gui.git && (cd pakmap-gui && makepkg -si)
+# or tarball (installs into /usr):
+tar xzf pakmap-gui-0.8.0-x86_64-linux.tar.gz  # from GitHub releases, run as root
+```
+
+Extra deps: `webkit2gtk-4.1`, `nodejs` + `pnpm` (build time), `polkit`; `flatpak` optional. Details: `docs/gui-architecture.md`.
 
 ## Usage
 

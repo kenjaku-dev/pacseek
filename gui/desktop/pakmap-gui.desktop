@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=pakmap
+GenericName=Package Explorer
+Comment=Search pacman repos, the AUR and Flatpak — info, updates, orphans, upgrades
+Exec=pakmap-gui
+Icon=pakmap-gui
+Terminal=false
+Categories=System;PackageManager;Utility;
+Keywords=pacman;aur;archlinux;flatpak;package;updates;orphans;
+StartupNotify=true

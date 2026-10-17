@@ -497,24 +497,37 @@ fn search(
 
 /// Spike smoke hook: `PAKMAP_GUI_SMOKE_MS=<ms>` auto-quits after the delay
 /// so release artifacts can be launched in scripts/xvfb CI without a human
-/// closing the window. Same pattern as `PAKMAP_SKIP_LIVE`.
-fn arm_smoke_timer() {
-    if let Some(ms) = std::env::var("PAKMAP_GUI_SMOKE_MS")
+/// closing the window. Same pattern as `PAKMAP_SKIP_LIVE`. The quit goes
+/// through `AppHandle::exit` (graceful run-loop shutdown) — a bare
+/// `std::process::exit` from the timer thread races the webkit atexit path
+/// and can segfault, which would fail the smoke's exit-code contract.
+fn arm_smoke_timer(app: tauri::AppHandle, ms: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+        app.exit(0);
+    });
+}
+
+fn build_smoke_trigger() -> Option<u64> {
+    std::env::var("PAKMAP_GUI_SMOKE_MS")
         .ok()
         .and_then(|ms| ms.parse::<u64>().ok())
-    {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            std::process::exit(0);
-        });
-    }
 }
 
 /// App entry: no unwrap/expect — a failed startup prints and exits 1
 /// (the run loop's error is terminal anyway).
 pub fn run() {
-    arm_smoke_timer();
+    let smoke = build_smoke_trigger();
     if let Err(e) = tauri::Builder::default()
+        // AF: real link opening (news → system browser via xdg-open); the
+        // capability grants only `opener:allow-open-url`, not paths.
+        .plugin(tauri_plugin_opener::init())
+        .setup(move |app| {
+            if let Some(ms) = smoke {
+                arm_smoke_timer(app.handle().clone(), ms);
+            }
+            Ok(())
+        })
         .manage(AppState {
             active_search: Arc::new(AtomicU64::new(0)),
             ops: ops::OpsState::new(),

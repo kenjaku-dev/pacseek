@@ -1,0 +1,55 @@
+# Maintainer: achraf <achraf@pacseek.local>
+# Template lives in the pakmap repo (packaging/aur/pakmap-gui/PKGBUILD) and is
+# published to the AUR as `pakmap-gui` at each release. pkgname/build layout
+# intentionally match the repo's `make install-gui-assets`.
+pkgname=pakmap-gui
+pkgver=0.8.0
+pkgrel=1
+pkgdesc="Desktop package explorer for Arch — search pacman repos, the AUR and Flatpak (Tauri companion to the pakmap TUI)"
+arch=('x86_64')
+url="https://github.com/kenjaku-dev/pakmap"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'polkit' 'pacman' 'git' 'pacman-contrib')
+makedepends=('cargo' 'nodejs' 'pnpm')
+optdepends=('flatpak: Flatpak source search, updates and install/remove')
+provides=('pakmap-gui')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/kenjaku-dev/pakmap/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')  # replaced with the real sum at publish time
+options=('!strip')  # release profile has strip = true (opt-level "z" + lto)
+
+prepare() {
+  cd "pakmap-${pkgver}"
+  # config contraction: the GUI reads the same TOML as the TUI; nothing to do
+}
+
+build() {
+  cd "pakmap-${pkgver}/gui"
+  pnpm install --frozen-lockfile
+  pnpm build                       # frontend dist/ (mock gateway tree-shaken in prod)
+  cd ..
+  export CARGO_TARGET_DIR="${srcdir}/target"
+  cargo build --release --locked -p pakmap-gui
+}
+
+check() {
+  cd "pakmap-${pkgver}/gui"
+  pnpm typecheck
+  pnpm test
+}
+
+package() {
+  cd "pakmap-${pkgver}"
+  _bindir="${pkgdir}/usr/bin"
+  _prefix="${pkgdir}/usr"
+  install -Dm755 "${srcdir}/target/release/pakmap-gui" "${_bindir}/pakmap-gui"
+  install -Dm644 gui/desktop/pakmap-gui.desktop \
+    "${_prefix}/share/applications/pakmap-gui.desktop"
+  install -Dm644 gui/src-tauri/icons/32x32.png \
+    "${_prefix}/share/icons/hicolor/32x32/apps/pakmap-gui.png"
+  install -Dm644 gui/src-tauri/icons/128x128.png \
+    "${_prefix}/share/icons/hicolor/128x128/apps/pakmap-gui.png"
+  install -Dm644 gui/src-tauri/icons/128x128@2x.png \
+    "${_prefix}/share/icons/hicolor/256x256/apps/pakmap-gui.png"
+  install -Dm644 LICENSE "${_prefix}/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${_prefix}/share/doc/${pkgname}/README.md"
+}

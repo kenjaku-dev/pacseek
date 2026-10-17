@@ -1,10 +1,11 @@
 // NewsScreen — Arch news feed (phase AD parity with the TUI news panel).
 // Manual-intervention items surface both as a page-level banner (upgrade
-// guard visibility) and a per-item badge. Links open outside the webview:
-// the webview blocks navigation by default, so the action is a clipboard copy
-// (AF note: tauri-plugin-opener lands with packaging).
+// guard visibility) and a per-item badge. AF: links open in the system
+// browser via the opener plugin (capability: allow-open-url only); a copy
+// fallback stays for users who want the raw URL.
+import { Copy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { getNews, normalizeGuiError } from "../lib/ipc";
+import { getNews, normalizeGuiError, openExternal } from "../lib/ipc";
 import type { NewsItemDto } from "../types";
 
 export function NewsScreen() {
@@ -86,14 +87,25 @@ export function NewsScreen() {
                   {item.pub_date ?? "unknown date"}
                 </p>
               </div>
-              <button
-                type="button"
-                aria-label={`Copy link to news item: ${item.title}`}
-                onClick={() => void navigator.clipboard.writeText(item.link)}
-                className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-card-muted hover:text-foreground"
-              >
-                Copy link
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label={`Open news item in browser: ${item.title}`}
+                  onClick={() => void openExternal(item.link)}
+                  className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-card-muted hover:text-foreground"
+                >
+                  Open
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Copy link to news item: ${item.title}`}
+                  onClick={() => void navigator.clipboard.writeText(item.link)}
+                  className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-card-muted hover:text-foreground"
+                >
+                  <Copy size={12} aria-hidden="true" />
+                  <span className="sr-only">Copy link</span>
+                </button>
+              </div>
             </div>
           </li>
         ))}

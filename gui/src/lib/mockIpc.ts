@@ -318,4 +318,7 @@ export async function dropOperation(_opId: number): Promise<void> {
   /* scripted gateway has no registry */
 }
 
+/** Mock: link opening is a no-op (browser E2E has no system browser target). */
+export async function openExternal(_url: string): Promise<void> {}
+
 export { normalizeGuiError };

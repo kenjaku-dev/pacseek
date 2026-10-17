@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "pakmap-gui",
-  "version": "0.7.0",
   "identifier": "io.github.kenjaku-dev.pakmap",
   "build": {
     "frontendDist": "../dist",

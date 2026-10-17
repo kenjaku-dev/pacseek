@@ -31,8 +31,16 @@ pakmap rust --installed-only
 ## 4. Release binary
 ```bash
 make release
-ls -lh target/release/pakmap   # ~5.1M stripped
+ls -lh target/release/pakmap   # ~6.1M stripped
 sudo install -Dm755 target/release/pakmap /usr/local/bin/pakmap
+```
+
+## 5. Desktop GUI (v0.8.0)
+```bash
+make gui-release        # pnpm build + cargo build --release -p pakmap-gui
+sudo make install-gui   # -> /usr/local/bin + .desktop + hicolor icons
+# AUR: pakmap-gui (git clone aur.archlinux.org/pakmap-gui && makepkg -si)
+# extras: webkit2gtk-4.1, polkit; pacman ops ask via pkexec (Cancel is safe)
 ```
 
 ## Shell completions (optional butter)

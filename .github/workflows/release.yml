@@ -17,14 +17,14 @@ jobs:
     name: Build · test · publish
     runs-on: ubuntu-latest
     container: archlinux:latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - name: Install toolchain
         run: |
           pacman-key --init
           pacman-key --populate archlinux
           pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman
+          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman nodejs
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory '*'
 
@@ -70,11 +70,53 @@ jobs:
           path: ${{ steps.build.outputs.artifact }}
           if-no-files-found: error
 
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: gui/package.json
+
+      - name: GUI toolchain (webkit for cargo link)
+        run: pacman -S --noconfirm --needed webkit2gtk-4.1
+
+      - name: Build GUI release binary
+        id: guibuild
+        run: |
+          set -e
+          pnpm --dir gui install --frozen-lockfile
+          pnpm --dir gui build
+          cargo build --release --locked -p pakmap-gui
+          VERSION="${{ steps.build.outputs.version }}"
+          STAGE="${RUNNER_TEMP}/pakmap-gui-usr"
+          mkdir -p "$STAGE/usr/bin" \
+                   "$STAGE/usr/share/applications" \
+                   "$STAGE/usr/share/icons/hicolor/32x32/apps" \
+                   "$STAGE/usr/share/icons/hicolor/128x128/apps" \
+                   "$STAGE/usr/share/icons/hicolor/256x256/apps" \
+                   "$STAGE/usr/share/licenses/pakmap-gui"
+          install -m755 target/release/pakmap-gui "$STAGE/usr/bin/pakmap-gui"
+          install -m644 gui/desktop/pakmap-gui.desktop "$STAGE/usr/share/applications/"
+          install -m644 gui/src-tauri/icons/32x32.png      "$STAGE/usr/share/icons/hicolor/32x32/apps/pakmap-gui.png"
+          install -m644 gui/src-tauri/icons/128x128.png    "$STAGE/usr/share/icons/hicolor/128x128/apps/pakmap-gui.png"
+          install -m644 gui/src-tauri/icons/128x128@2x.png "$STAGE/usr/share/icons/hicolor/256x256/apps/pakmap-gui.png"
+          install -m644 LICENSE "$STAGE/usr/share/licenses/pakmap-gui/LICENSE"
+          TARBALL="${RUNNER_TEMP}/pakmap-gui-${VERSION}-x86_64-linux.tar.gz"
+          tar -C "$STAGE" -czf "$TARBALL" usr
+          ls -lh "$TARBALL"
+          echo "artifact=$TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload GUI artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pakmap-gui-${{ steps.build.outputs.version }}-x86_64-linux
+          path: ${{ steps.guibuild.outputs.artifact }}
+          if-no-files-found: error
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: pakmap ${{ steps.build.outputs.version }}
-          files: ${{ steps.build.outputs.artifact }}
+          files: |
+            ${{ steps.build.outputs.artifact }}
+            ${{ steps.guibuild.outputs.artifact }}
           generate_release_notes: true
           fail_on_unmatched_files: true

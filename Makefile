@@ -1,5 +1,7 @@
 # pakmap — butter Makefile
-.PHONY: help build release install test fmt clippy clean run
+PREFIX ?= /usr/local
+
+.PHONY: help build release install test fmt clippy clean run gui-dev gui-release gui-e2e install-gui install-gui-assets uninstall-gui
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -34,6 +36,34 @@ clean: ## Clean target
 
 run: ## Quick run, e.g. make run Q=firefox
 	cargo run -- $(Q) --limit 5
+
+gui-dev: ## Run the desktop GUI in dev mode (hot reload)
+	cd gui && pnpm tauri dev
+
+gui-release: ## Release build of the GUI binary (dist/ + cargo)
+	cd gui && pnpm install --frozen-lockfile
+	cd gui && pnpm build
+	cargo build --release --locked -p pakmap-gui
+	@ls -lh target/release/pakmap-gui
+
+gui-e2e: ## GUI battery (vitest axe/e2e via Playwright, mock gateway)
+	cd gui && pnpm test
+	cd gui && pnpm exec playwright test
+
+install-gui: gui-release ## Install GUI + .desktop + hicolor icons (DESTDIR/PREFIX aware)
+	install -Dm755 target/release/pakmap-gui $(DESTDIR)$(PREFIX)/bin/pakmap-gui
+	$(MAKE) install-gui-assets DESTDIR=$(DESTDIR) PREFIX=$(PREFIX)
+
+install-gui-assets: ## .desktop + icons only (AUR package() reuses this)
+	install -Dm644 gui/desktop/pakmap-gui.desktop $(DESTDIR)$(PREFIX)/share/applications/pakmap-gui.desktop
+	install -Dm644 gui/src-tauri/icons/32x32.png      $(DESTDIR)$(PREFIX)/share/icons/hicolor/32x32/apps/pakmap-gui.png
+	install -Dm644 gui/src-tauri/icons/128x128.png    $(DESTDIR)$(PREFIX)/share/icons/hicolor/128x128/apps/pakmap-gui.png
+	install -Dm644 gui/src-tauri/icons/128x128@2x.png $(DESTDIR)$(PREFIX)/share/icons/hicolor/256x256/apps/pakmap-gui.png
+
+uninstall-gui: ## Remove GUI binary + .desktop + icons (same DESTDIR/PREFIX)
+	rm -f $(DESTDIR)$(PREFIX)/bin/pakmap-gui
+	rm -f $(DESTDIR)$(PREFIX)/share/applications/pakmap-gui.desktop
+	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/{32x32,128x128,256x256}/apps/pakmap-gui.png
 
 # butter aliases
 dev: fmt clippy build ## fmt+clippy+build in one go

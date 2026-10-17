@@ -81,6 +81,11 @@ export function getStats(): Promise<StatsDto> {
   return gw.getStats();
 }
 
+/** Open an external link in the system browser (news; AF opener plugin). */
+export function openExternal(url: string): Promise<void> {
+  return gw.openExternal(url);
+}
+
 /** normalizeGuiError is re-exported above — shared by both gateways. */
 
 export type { SearchEvent };
