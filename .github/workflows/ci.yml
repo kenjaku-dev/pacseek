@@ -22,6 +22,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       landing: ${{ steps.filter.outputs.landing }}
+      gui: ${{ steps.filter.outputs.gui }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
