@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root {
+  /* AC replaces this with shared tokens from pakmap-landing/design-system */
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+}

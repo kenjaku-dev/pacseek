@@ -1,6 +1,11 @@
 /target
 .DS_Store
 *.log
+# AB: pnpm + GUI build noise
+gui/node_modules/
+gui/dist/
+gui/src-tauri/target/
+gui/src-tauri/gen/
 # auto-sync local noise
 .pakmap-auto-sync*
 *.pid

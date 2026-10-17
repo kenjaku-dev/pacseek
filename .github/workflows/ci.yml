@@ -41,6 +41,9 @@ jobs:
               - 'pakmap-landing/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/pages.yml'
+            gui:
+              - 'gui/**'
+              - '.github/workflows/ci.yml'
 
   rust:
     name: Rust (fmt · clippy · test)
@@ -108,6 +111,52 @@ jobs:
           cargo build --release --locked
           ls -lh target/release/pakmap
 
+  gui:
+    name: GUI (frontend build · clippy · check)
+    needs: changes
+    if: needs.changes.outputs.gui == 'true'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Trust workspace in container
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel rust git pkgconf pacman nodejs npm webkit2gtk-4.1 librsvg
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: gui/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: gui/pnpm-lock.yaml
+
+      - name: Install (frontend)
+        run: pnpm --dir gui install --frozen-lockfile
+
+      - name: Build frontend (typecheck + vite)
+        run: pnpm --dir gui build
+
+      - name: Clippy (gui crate)
+        run: cargo clippy -p pakmap-gui --locked --all-targets -- -D warnings
+
+      - name: Check (gui links against webkit2gtk)
+        run: cargo check -p pakmap-gui --locked
+
   landing:
     name: Landing (lint · typecheck · build)
     needs: changes
@@ -144,7 +193,7 @@ jobs:
 
   ci-ok:
     name: CI OK
-    needs: [changes, rust, landing]
+    needs: [changes, rust, gui, landing]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -152,21 +201,27 @@ jobs:
       - name: Require relevant jobs to succeed
         run: |
           rust="${{ needs.changes.outputs.rust }}"
+          gui="${{ needs.changes.outputs.gui }}"
           landing="${{ needs.changes.outputs.landing }}"
           rust_result="${{ needs.rust.result }}"
+          gui_result="${{ needs.gui.result }}"
           landing_result="${{ needs.landing.result }}"
-          echo "rust=$rust ($rust_result) landing=$landing ($landing_result)"
+          echo "rust=$rust ($rust_result) gui=$gui ($gui_result) landing=$landing ($landing_result)"
 
           fail=0
           if [ "$rust" = "true" ] && [ "$rust_result" != "success" ]; then
             echo "::error::Rust CI failed or was cancelled"
             fail=1
           fi
+          if [ "$gui" = "true" ] && [ "$gui_result" != "success" ]; then
+            echo "::error::GUI CI failed or was cancelled"
+            fail=1
+          fi
           if [ "$landing" = "true" ] && [ "$landing_result" != "success" ]; then
             echo "::error::Landing CI failed or was cancelled"
             fail=1
           fi
-          if [ "$rust" != "true" ] && [ "$landing" != "true" ]; then
+          if [ "$rust" != "true" ] && [ "$gui" != "true" ] && [ "$landing" != "true" ]; then
             echo "No tracked paths changed — OK"
           fi
           exit "$fail"

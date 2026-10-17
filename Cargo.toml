@@ -1,3 +1,14 @@
+# AB workspace: root package `pakmap` (CLI/TUI) + `gui/src-tauri` (Tauri 2.12 GUI).
+# default-members keeps bare cargo commands (CI rust job, Makefile, install.sh)
+# operating on the CLI crate exactly as before — GUI gates use explicit -p/--workspace.
+[workspace]
+members = ["gui/src-tauri"]
+default-members = ["."]
+
+[workspace.package]
+# Tauri 2.12 policy is stable-3 (MSRV 1.90); local toolchain far ahead.
+rust-version = "1.90"
+
 [package]
 name = "pakmap"
 version = "0.7.0"
@@ -9,7 +20,7 @@ repository = "https://github.com/kenjaku-dev/pakmap"
 keywords = ["aur", "pacman", "alpm", "arch", "search"]
 categories = ["command-line-utilities"]
 readme = "README.md"
-rust-version = "1.88"
+rust-version = { workspace = true }
 
 # Perf P5: production code must never panic on bad input — deny unwrap/expect
 # everywhere, then re-allow inside #[cfg(test)] modules (one cfg_attr in

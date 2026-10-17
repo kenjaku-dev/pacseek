@@ -1,0 +1,21 @@
+[package]
+name = "pakmap-gui"
+version = "0.7.0"
+edition = "2024"
+description = "pakmap desktop GUI (Tauri 2) — search/install/remove Arch repo, AUR and Flatpak packages"
+authors = ["achraf"]
+license = "MIT"
+rust-version = { workspace = true }
+
+# Same P5 discipline as the core crate: no unwrap/expect outside tests.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+pakmap = { path = "../.." }
+tauri = { version = "2.12", features = [] }
+serde = { version = "1", features = ["derive"] }
