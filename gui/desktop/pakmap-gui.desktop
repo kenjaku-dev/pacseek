@@ -6,6 +6,6 @@ Comment=Search pacman repos, the AUR and Flatpak — info, updates, orphans, upg
 Exec=pakmap-gui
 Icon=pakmap-gui
 Terminal=false
-Categories=System;PackageManager;Utility;
+Categories=System;PackageManager;
 Keywords=pacman;aur;archlinux;flatpak;package;updates;orphans;
 StartupNotify=true

@@ -17,11 +17,6 @@ source=("${pkgname}-${pkgver}.tar.gz::https://github.com/kenjaku-dev/pakmap/arch
 sha256sums=('SKIP')  # replaced with the real sum at publish time
 options=('!strip')  # release profile has strip = true (opt-level "z" + lto)
 
-prepare() {
-  cd "pakmap-${pkgver}"
-  # config contraction: the GUI reads the same TOML as the TUI; nothing to do
-}
-
 build() {
   cd "pakmap-${pkgver}/gui"
   pnpm install --frozen-lockfile
