@@ -50,9 +50,16 @@ gui-e2e: ## GUI battery (vitest axe/e2e via Playwright, mock gateway)
 	cd gui && pnpm test
 	cd gui && pnpm exec playwright test
 
-install-gui: gui-release ## Install GUI + .desktop + hicolor icons (DESTDIR/PREFIX aware)
+install-gui: ## Install GUI + .desktop + hicolor icons (DESTDIR/PREFIX aware). Run `make gui-release` first, as your user
+	@test -x target/release/pakmap-gui || { \
+	  echo "target/release/pakmap-gui not built yet."; \
+	  echo "Run 'make gui-release' as your user first — NOT under sudo:"; \
+	  echo "sudo strips PATH (~/.local/bin), so the pnpm build cannot run there."; \
+	  exit 1; \
+	}
 	install -Dm755 target/release/pakmap-gui $(DESTDIR)$(PREFIX)/bin/pakmap-gui
 	$(MAKE) install-gui-assets DESTDIR=$(DESTDIR) PREFIX=$(PREFIX)
+	@echo "Installed pakmap-gui to $(DESTDIR)$(PREFIX)/bin"
 
 install-gui-assets: ## .desktop + icons only (AUR package() reuses this)
 	install -Dm644 gui/desktop/pakmap-gui.desktop $(DESTDIR)$(PREFIX)/share/applications/pakmap-gui.desktop
